@@ -1,0 +1,33 @@
+[package]
+authors = ["Paul Collier <paul@paulcollier.ca>"]
+name = "exude"
+publish = false
+version = "0.1.0"
+
+[profile.dev]
+opt-level = 1 # faster hashing
+
+[dependencies]
+bincode = "1.0.0-alpha7"
+byteorder = "1.0.0"
+digest = "0.5"
+serde = "0.9"
+serde_derive = "0.9"
+
+# client/server specific
+futures = "0.1"
+libloading = "0.3.2"
+sha3 = "0.5"
+tokio-core = "0.1"
+tokio-io = "0.1"
+
+# driver-specific
+gfx = "0.14"
+gfx_window_glutin = "*"
+glutin = "*"
+
+
+[lib]
+crate-type = ["dylib"]
+name = "driver"
+path = "src/driver.rs"
