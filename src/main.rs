@@ -151,9 +151,10 @@ impl HashedHeapFile {
         assert!(buf.len() < receive::INLINE_MAX);
         let len = buf.len() as u32;
         let resp = common::Welcome::InlineDriver(len, digest);
-        let coded = Bincoded::new(&resp).unwrap(); // xxx
+        let coded = Bincoded::new(&resp);
 
-        common::write_with_length(w, coded)
+        futures::future::lazy(|| coded)
+            .and_then(move |coded| common::write_with_length(w, coded))
             .and_then(move |(w, _)| tokio_io::io::write_all(w, buf))
             .and_then(move |(w, _)| Ok(w))
     }

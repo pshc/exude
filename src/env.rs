@@ -25,6 +25,13 @@ pub mod bincoded {
 
     pub static BINCODED_MAX: u64 = 0xffff;
 
+    fn to_io_err(err: bincode::Error) -> io::Error {
+        match *err {
+            bincode::ErrorKind::IoError(io) => io,
+            e => io::Error::new(ErrorKind::Other, e)
+        }
+    }
+
     impl<T> Bincoded<T> {
         /// Returns the number of serialized bytes stored. Does not include length header.
         pub fn len(&self) -> usize {
@@ -40,10 +47,10 @@ pub mod bincoded {
 
     impl<T: Serialize> Bincoded<T> {
         /// Serializes `value`, storing the serialized bytes in `self`.
-        pub fn new(value: &T) -> bincode::Result<Self> {
+        pub fn new(value: &T) -> io::Result<Self> {
             let size_limit = bincode::Bounded(BINCODED_MAX);
             Ok(Bincoded {
-                vec: bincode::serialize(value, size_limit)?,
+                vec: bincode::serialize(value, size_limit).map_err(to_io_err)?,
                 _phantom: PhantomData,
             })
         }
@@ -51,9 +58,11 @@ pub mod bincoded {
 
     impl<T: Deserialize> Bincoded<T> {
         /// Deserialize the contained bytes.
-        pub fn deserialize(&self) -> bincode::Result<T> {
+        pub fn deserialize(&self) -> io::Result<T> {
             let mut cursor = io::Cursor::new(&self.vec);
-            let result = bincode::deserialize_from(&mut cursor, bincode::Infinite)?;
+            let result = bincode::deserialize_from(&mut cursor, bincode::Infinite)
+                .map_err(to_io_err)?;
+
             // ensure the deserializer consumed every last byte
             let len = self.len() as u64;
             if cursor.position() == len {
@@ -61,7 +70,7 @@ pub mod bincoded {
             } else {
                 let msg = format!("extra bytes ({})", len - cursor.position());
                 let io = io::Error::new(ErrorKind::InvalidData, msg);
-                Err(bincode::Error::new(bincode::ErrorKind::IoError(io)))
+                Err(io)
             }
         }
     }
@@ -88,10 +97,8 @@ pub mod bincoded {
     #[test]
     fn too_short() {
         let short: Bincoded<u32> = Bincoded {vec: vec![1, 2, 3], _phantom: PhantomData};
-        match *short.deserialize().unwrap_err() {
-            bincode::ErrorKind::IoError(io) => assert_eq!(io.kind(), ErrorKind::UnexpectedEof),
-            e => panic!(e)
-        }
+        let err = short.deserialize().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
     }
 
     #[test]
@@ -100,12 +107,8 @@ pub mod bincoded {
         use std::error::Error;
         let bytes: Vec<u8> = iter::repeat(0).take(17).collect();
         let long: Bincoded<(u64, u64)> = Bincoded {vec: bytes, _phantom: PhantomData};
-        match *long.deserialize().unwrap_err() {
-            bincode::ErrorKind::IoError(io) => {
-                assert_eq!(io.kind(), ErrorKind::InvalidData);
-                assert_eq!(io.description(), "extra bytes (1)");
-            }
-            e => panic!(e)
-        }
+        let err = long.deserialize().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert_eq!(err.description(), "extra bytes (1)");
     }
 }
