@@ -1,10 +1,27 @@
 //! Shared interface between the loader and driver.
 
+use std::io::{self, ErrorKind};
 use std::sync::mpsc;
+
+use serde::Serialize;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub enum UpRequest {
+    Ping(u32),
+    Bye,
+}
 
 pub struct DriverEnv {
     pub rx: mpsc::Receiver<Option<Vec<u8>>>,
     pub tx: mpsc::Sender<Option<Vec<u8>>>,
+}
+
+impl DriverEnv {
+    pub fn send<T: Serialize>(&self, msg: &T) -> io::Result<()> {
+        let bin = bincoded::Bincoded::new(msg)?;
+        self.tx.send(Some(bin.into()))
+            .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "driver send broke"))
+    }
 }
 
 pub mod bincoded {

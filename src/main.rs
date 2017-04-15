@@ -52,7 +52,7 @@ macro_rules! try_box {
 }
 
 fn serve(addr: &SocketAddr) -> io::Result<()> {
-    let mut core = Core::new().unwrap();
+    let mut core = Core::new()?;
     let handle = core.handle();
 
     // attempt to be a server
@@ -99,12 +99,12 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=
             let read_req = common::read_bincoded(r);
             let dispatch_req = read_req.and_then(move |(r, req)| {
                 match req {
-                    common::UpRequest::Ping(n) => {
+                    env::UpRequest::Ping(n) => {
                         println!("{} pinged ({})", addr, n);
                         // pong?
                         Ok(Loop::Continue((r, w)))
                     }
-                    common::UpRequest::Bye => {
+                    env::UpRequest::Bye => {
                         println!("{} says bye", addr);
                         Ok(Loop::Break(()))
                     }

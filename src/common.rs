@@ -22,12 +22,6 @@ pub enum Welcome {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Hello(pub Option<Digest>);
 
-#[derive(Debug, Deserialize, Serialize)]
-pub enum UpRequest {
-    Ping(u32),
-    Bye,
-}
-
 mod digest {
     use std::fmt::{self, Debug, Display, Write};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

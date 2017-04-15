@@ -3,6 +3,8 @@
 extern crate alloc_system;
 extern crate bincode;
 extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 
 mod env;
 
@@ -37,7 +39,7 @@ pub extern fn driver(env: Box<env::DriverEnv>) {
 
             if let Ok(n) = line.trim().parse::<u32>() {
                 println!("n: {}", n);
-                env.tx.send(Some(vec![42; n as usize])).unwrap();
+                env.send(&env::UpRequest::Ping(n)).unwrap();
             }
         }
     });
