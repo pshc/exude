@@ -4,7 +4,7 @@
 
 use std::io::{self, ErrorKind};
 
-use futures::future::Future;
+use futures::future::{self, Future};
 use serde::{Deserialize, Serialize};
 use tokio_io::{self, AsyncRead, AsyncWrite};
 
@@ -204,15 +204,19 @@ pub fn read_bincoded<R: AsyncRead, T: Deserialize>(reader: R)
 /// Write a 16-bit length header, and then the bytes asynchronously.
 ///
 /// The future returns `(write_half, vec)`.
-pub fn write_with_length<W: AsyncWrite, V: Into<Vec<u8>>>(writer: W, vec: V)
--> impl Future<Item=(W, Vec<u8>), Error=io::Error>
+pub fn write_with_length<W: AsyncWrite, V: AsRef<[u8]>>(writer: W, vec: V)
+-> impl Future<Item=(W, V), Error=io::Error>
 {
-    let vec = vec.into();
-    let len = vec.len();
-    assert!(len <= 0xffff); // xxx should return a descriptive error or something?
-    let len_buf = [(len >> 8) as u8, len as u8];
-    tokio_io::io::write_all(writer, len_buf)
-        .and_then(|(writer, _)| tokio_io::io::write_all(writer, vec))
+    let len = vec.as_ref().len();
+    future::lazy(move || {
+        if len <= 0xffff {
+            Ok([(len >> 8) as u8, len as u8])
+        } else {
+            Err(io::Error::new(ErrorKind::InvalidInput, format!("msg too long: {}", len)))
+        }
+    })
+    .and_then(move |len_buf| tokio_io::io::write_all(writer, len_buf))
+    .and_then(move |(writer, _)| tokio_io::io::write_all(writer, vec))
 }
 
 /// Write a 16-bit length header, and then the serialized bytes.
@@ -220,12 +224,7 @@ pub fn write_bincoded<W: AsyncWrite + 'static, T: Serialize + 'static>(writer: W
 -> Box<Future<Item=(W, Bincoded<T>), Error=io::Error>>
 {
     match Bincoded::new(value) {
-        Ok(bincoded) => {
-            // it's awkward that we immediately unwrap and rewrap the Bincoded vec...
-            box write_with_length(writer, bincoded)
-                .map(|(w, vec)| (w, unsafe { Bincoded::from_vec(vec) }))
-        }
-        Err(e) => box ::futures::future::err(io::Error::new(ErrorKind::InvalidInput, e))
+        Ok(bincoded) => box write_with_length(writer, bincoded),
+        Err(e) => box future::err(io::Error::new(ErrorKind::InvalidInput, e))
     }
-
 }
