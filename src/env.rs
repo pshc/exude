@@ -1,9 +1,9 @@
 //! Shared interface between the loader and driver.
 
 use std::io::{self, ErrorKind};
-use std::sync::mpsc;
 
-use serde::Serialize;
+use libc::c_void;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum UpRequest {
@@ -11,16 +11,68 @@ pub enum UpRequest {
     Bye,
 }
 
+pub struct DriverCtx(pub *mut c_void);
+unsafe impl Send for DriverCtx {}
+
+/// For transmitting messages between driver and client core.
+/// Uses C ABI in an attempt at interface stability.
+#[repr(C)]
 pub struct DriverEnv {
-    pub rx: mpsc::Receiver<Option<Vec<u8>>>,
-    pub tx: mpsc::Sender<Option<Vec<u8>>>,
+    /// Must be passed into all below functions.
+    pub ctx: DriverCtx,
+
+    /// Passed bytes will be copied to an internal buffer.
+    /// On error, returns a negative value.
+    pub send_fn: extern fn(*mut c_void, buf: *const u8, len: i32) -> i32,
+
+    /// Attempt to receive a message, non-blocking.
+    /// On message, writes the pointer to a new allocated buffer, and returns its length.
+    /// If no messages are pending, returns zero.
+    /// On error, returns a negative value.
+    pub try_recv_fn: extern fn(*mut c_void, buf_out: *mut *mut u8) -> i32,
+
+    /// Automatically called by `DriverEnv::drop`.
+    /// Closes communication channels and frees memory.
+    pub shutdown_fn: extern fn(*mut c_void),
 }
 
 impl DriverEnv {
+    #[allow(dead_code)]
     pub fn send<T: Serialize>(&self, msg: &T) -> io::Result<()> {
+        // so many copies... ugh!
         let bin = bincoded::Bincoded::new(msg)?;
-        self.tx.send(Some(bin.into()))
-            .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "driver send broke"))
+        let vec: Vec<u8> = bin.into();
+        assert!(vec.len() <= ::std::i32::MAX as usize);
+        if (self.send_fn)(self.ctx.0, vec.as_ptr(), vec.len() as i32) >= 0 {
+            Ok(())
+        } else {
+            Err(io::Error::new(ErrorKind::BrokenPipe, "send: pipe broken"))
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn try_recv<T: Deserialize>(&self) -> io::Result<Option<T>> {
+        use std::ptr;
+        let mut buf_ptr = ptr::null_mut();
+        let len = (self.try_recv_fn)(self.ctx.0, &mut buf_ptr);
+        if len > 0 {
+            let slice = unsafe { ::std::slice::from_raw_parts(buf_ptr, len as usize) };
+            let result = bincoded::deserialize_exact(slice);
+            unsafe {
+                drop(Box::from_raw(buf_ptr))
+            }
+            result.map(Some)
+        } else if len == 0 {
+            Ok(None)
+        } else {
+            Err(io::Error::new(ErrorKind::BrokenPipe, "try_recv: pipe broken"))
+        }
+    }
+}
+
+impl Drop for DriverEnv {
+    fn drop(&mut self) {
+        (self.shutdown_fn)(self.ctx.0)
     }
 }
 
@@ -73,22 +125,27 @@ pub mod bincoded {
         }
     }
 
+    pub fn deserialize_exact<R: AsRef<[u8]>, T: Deserialize>(slice: R) -> io::Result<T> {
+        let slice = slice.as_ref();
+        let len = slice.len() as u64;
+        let ref mut cursor = io::Cursor::new(slice);
+        let result = bincode::deserialize_from(cursor, bincode::Infinite).map_err(to_io_err)?;
+
+        // ensure the deserializer consumed every last byte
+        if cursor.position() == len {
+            Ok(result)
+        } else {
+            let msg = format!("extra bytes ({})", len - cursor.position());
+            let io = io::Error::new(ErrorKind::InvalidData, msg);
+            Err(io)
+        }
+
+    }
+
     impl<T: Deserialize> Bincoded<T> {
         /// Deserialize the contained bytes.
         pub fn deserialize(&self) -> io::Result<T> {
-            let mut cursor = io::Cursor::new(&self.vec);
-            let result = bincode::deserialize_from(&mut cursor, bincode::Infinite)
-                .map_err(to_io_err)?;
-
-            // ensure the deserializer consumed every last byte
-            let len = self.len() as u64;
-            if cursor.position() == len {
-                Ok(result)
-            } else {
-                let msg = format!("extra bytes ({})", len - cursor.position());
-                let io = io::Error::new(ErrorKind::InvalidData, msg);
-                Err(io)
-            }
+            deserialize_exact(self)
         }
     }
 

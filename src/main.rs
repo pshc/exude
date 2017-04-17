@@ -9,6 +9,7 @@ extern crate futures;
 extern crate gfx;
 extern crate gfx_window_glutin;
 extern crate glutin;
+extern crate libc;
 extern crate libloading;
 extern crate serde;
 #[macro_use]
@@ -18,26 +19,25 @@ extern crate tokio_core;
 extern crate tokio_io;
 
 mod common;
+mod connector;
 mod env;
 mod receive;
 
 use std::fs::{self, File};
-use std::io::{self, ErrorKind, Read, Write, stdout};
+use std::io::{self, ErrorKind, Read, Write};
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
 use futures::{IntoFuture, Future, Stream};
 use futures::future::Either;
 use gfx::Device;
-use libloading::{Library, Symbol};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use env::bincoded::Bincoded;
-use env::DriverEnv;
 
 
 /// hopefully replace with `?` later
@@ -160,42 +160,6 @@ impl HashedHeapFile {
     }
 }
 
-pub struct Api<'lib> {
-    s_driver: Symbol<'lib, extern fn(Box<DriverEnv>)>,
-    s_version: Symbol<'lib, extern fn() -> u32>,
-}
-
-impl<'lib> Api<'lib> {
-    pub unsafe fn new(lib: &'lib Library) -> libloading::Result<Self> {
-        Ok(Api {
-            s_driver: lib.get(b"driver\0")?,
-            s_version: lib.get(b"version\0")?,
-        })
-    }
-
-    pub fn driver(&self, env: Box<DriverEnv>) {
-        (*self.s_driver)(env)
-    }
-
-    pub fn version(&self) -> u32 {
-        (*self.s_version)()
-    }
-}
-
-fn load(path: &Path, env: Box<DriverEnv>) -> libloading::Result<()> {
-    let lib = Library::new(path)?;
-    let api = unsafe { Api::new(&lib)? };
-
-    print!("loaded driver ");
-    stdout().flush().ok().expect("flush1");
-    println!("v{}", api.version());
-    stdout().flush().ok().expect("flush2");
-
-    api.driver(env);
-
-    return Ok(())
-}
-
 /// Downloads the newest driver (if needed), returning its path.
 fn fetch_driver<R: AsyncRead + 'static>(reader: R)
     -> Box<Future<Item=(R, common::Digest, PathBuf), Error=io::Error>>
@@ -232,7 +196,7 @@ fn main() {
     }
 
     // for sending a new driver from net to draw thread
-    let (update_tx, update_rx) = mpsc::channel::<(PathBuf, Box<DriverEnv>)>();
+    let (update_tx, update_rx) = mpsc::channel::<(PathBuf, Box<connector::DriverComms>)>();
 
     let _net_thread = thread::spawn(move || {
         let mut core = Core::new().unwrap();
@@ -253,25 +217,22 @@ fn main() {
                 println!("driver {}", digest.short_hex());
 
                 let (driver_tx, driver_rx) = mpsc::channel();
-                let (tx, rx) = mpsc::channel();
-                let env = DriverEnv {rx:driver_rx, tx:tx};
+                let (tx, rx) = futures::sync::mpsc::unbounded();
+                let comms = connector::DriverComms {rx: driver_rx, tx: tx};
 
                 // inform the draw thread about our new driver
-                update_tx.send((path, box env)).unwrap();
+                update_tx.send((path, box comms)).unwrap();
 
                 // now be a dumb pipe, but with length-delimited messages for some reason??
                 // todo: read more than one message
                 let read = common::read_with_length(r).and_then(move |(_r, vec)| {
-                    driver_tx.send(Some(vec)).map_err(|e| {
-                        // note: SendError holds the Option<Vec<u8>>... is that what we want?
-                        io::Error::new(ErrorKind::BrokenPipe, e)
+                    driver_tx.send(vec.into_boxed_slice()).map_err(|_| {
+                        io::Error::new(ErrorKind::BrokenPipe, "core: done reading")
                     })
                 });
 
-                let (relay_tx, relay_rx) = futures::sync::mpsc::unbounded();
-
-                let write = relay_rx
-                .map_err(|()| io::Error::new(ErrorKind::Other, "write relay broke?!"))
+                let write = rx
+                .map_err(|()| io::Error::new(ErrorKind::BrokenPipe, "core: done writing"))
                 // TEMP: explicit type and box to avoid ICE
                 .fold(w, |w, msg|
                     -> Box<Future<Item=tokio_io::io::WriteHalf<TcpStream>, Error=io::Error>>
@@ -280,35 +241,21 @@ fn main() {
                 })
                 .map(|_| println!("write: donezo"));
 
-                // HACK -- wow this is a stupid extra hop
-                // just give the driver a callback or something, smh
-                let _relay_thread = thread::spawn(move || {
-                    loop {
-                        match rx.recv() {
-                            Ok(None) => break,
-                            Ok(Some(msg)) => {
-                                // NOPE
-                                use futures::sync::mpsc::UnboundedSender;
-                                if let Err(e) = UnboundedSender::send(&relay_tx, msg) {
-                                    println!("write relay: {:?}", e);
-                                    break
-                                }
-                            }
-                            Err(mpsc::RecvError) => {
-                                println!("write relay: pipe broken");
-                                break
-                            }
-                        }
-                    }
-                    println!("read: donezo");
-                });
-
                 read.join(write)
             })
         });
 
         core.run(client).unwrap();
     });
+
+    {
+        let (path, comms) = update_rx.recv().unwrap();
+        println!("loading driver...");
+        io::stdout().flush().unwrap();
+        connector::load(&path, comms).unwrap();
+        println!("driver finished!");
+        io::stdout().flush().unwrap();
+    }
 
     // otherwise, we're a client
     pub type ColorFormat = gfx::format::Rgba8;
@@ -324,14 +271,6 @@ fn main() {
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
 
     'main: loop {
-        if let Ok((path, env)) = update_rx.try_recv() {
-            println!("render: updating driver...");
-            io::stdout().flush().unwrap();
-            load(&path, env).unwrap();
-            println!("render: driver updated!");
-            io::stdout().flush().unwrap();
-        }
-
         for event in window.poll_events() {
             use glutin::VirtualKeyCode::*;
 

@@ -2,6 +2,7 @@
 
 extern crate alloc_system;
 extern crate bincode;
+extern crate libc;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
@@ -17,7 +18,9 @@ pub extern fn version() -> u32 {
 }
 
 #[no_mangle]
-pub extern fn driver(env: Box<env::DriverEnv>) {
+pub extern fn driver(env: *mut env::DriverEnv) {
+    let env = unsafe { Box::from_raw(env) };
+
     let _input = thread::spawn(move || {
         let stdin = io::stdin();
         let mut stdout = io::stdout();
@@ -37,10 +40,19 @@ pub extern fn driver(env: Box<env::DriverEnv>) {
                 }
             };
 
-            if let Ok(n) = line.trim().parse::<u32>() {
+            let line = line.trim();
+            if line == "q" {
+                break
+            }
+
+            if let Ok(n) = line.parse::<u32>() {
                 println!("n: {}", n);
                 env.send(&env::UpRequest::Ping(n)).unwrap();
             }
         }
+
+        drop(env);
     });
+
+    _input.join().unwrap();
 }
