@@ -11,6 +11,11 @@ pub enum UpRequest {
     Bye,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub enum DownResponse {
+    Pong(u32),
+}
+
 pub struct DriverCtx(pub *mut c_void);
 unsafe impl Send for DriverCtx {}
 

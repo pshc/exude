@@ -101,17 +101,16 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=
                 match req {
                     env::UpRequest::Ping(n) => {
                         println!("{} pinged ({})", addr, n);
-                        // pong?
-                        Ok(Loop::Continue((r, w)))
+
+                        Either::A(common::write_bincoded(w, &env::DownResponse::Pong(n))
+                            .and_then(move |(w, _)| Ok(Loop::Continue((r, w)))))
                     }
                     env::UpRequest::Bye => {
                         println!("{} says bye", addr);
-                        Ok(Loop::Break(()))
+                        Either::B(Ok(Loop::Break(())).into_future())
                     }
                 }
             });
-
-            // join asynchronous writes? how do we share the writer?
 
             dispatch_req
         })

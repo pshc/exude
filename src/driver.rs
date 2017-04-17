@@ -26,9 +26,17 @@ pub extern fn driver(env: *mut env::DriverEnv) {
         let mut stdout = io::stdout();
         let mut line = String::new();
         loop {
+            match env.try_recv::<env::DownResponse>() {
+                Ok(None) => (),
+                Ok(Some(resp)) => {
+                    println!("=== {:?} ===", resp);
+                }
+                Err(_) => println!("driver: cannot read")
+            }
+
             print!("> ");
-            let result = stdout.flush();
-            debug_assert!(result.is_ok());
+            let _res = stdout.flush();
+            debug_assert!(_res.is_ok());
 
             line.clear();
             let line = match stdin.read_line(&mut line) {
