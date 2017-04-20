@@ -7,6 +7,7 @@ extern crate bincode;
 extern crate digest;
 extern crate futures;
 extern crate gfx;
+extern crate gfx_device_gl;
 extern crate gfx_window_glutin;
 extern crate glutin;
 extern crate libc;
@@ -45,7 +46,7 @@ macro_rules! try_box {
     ($expr:expr) => (match $expr {
         Result::Ok(val) => val,
         Result::Err(err) => {
-			// todo call `into_future` unambiguously
+            // todo call `into_future` unambiguously
             return Box::new(Result::Err(From::from(err)).into_future())
         }
     })
@@ -247,29 +248,35 @@ fn main() {
         core.run(client).unwrap();
     });
 
-    {
-        let (path, comms) = update_rx.recv().unwrap();
-        println!("loading driver...");
-        io::stdout().flush().unwrap();
-        connector::load(&path, comms).unwrap();
-        println!("driver finished!");
-        io::stdout().flush().unwrap();
-    }
-
     // otherwise, we're a client
-    pub type ColorFormat = gfx::format::Rgba8;
-    pub type DepthFormat = gfx::format::Depth; //Stencil;
+    type DepthFormat = gfx::format::Depth;
     const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.1, 1.0];
+    const READY_COLOR: [f32; 4] = [0.0, 0.5, 0.0, 1.0];
+
     let builder = glutin::WindowBuilder::new()
         .with_title("Germ".to_string())
         .with_dimensions(1024, 768)
         .with_vsync();
     let (window, mut device, mut factory, mut main_color, mut main_depth) =
-        gfx_window_glutin::init::<ColorFormat, DepthFormat>(builder);
+        gfx_window_glutin::init::<env::ColorFormat, DepthFormat>(builder);
 
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
 
+    let mut driver = None;
+
     'main: loop {
+        if let Ok((path, comms)) = update_rx.try_recv() {
+
+            println!("loading driver...");
+            io::stdout().flush().unwrap();
+            let loaded = connector::load(&path, comms).unwrap();
+            println!("driver setup!");
+            io::stdout().flush().unwrap();
+
+            let ctx = (loaded.gl_setup())(&mut factory, box main_color.clone()).unwrap();
+            driver = Some((loaded, ctx));
+        }
+
         for event in window.poll_events() {
             use glutin::VirtualKeyCode::*;
 
@@ -287,13 +294,19 @@ fn main() {
             // we should probably forward the events to driver?
         }
 
-        encoder.clear(&main_color, CLEAR_COLOR);
+        encoder.clear(&main_color, if driver.is_some() { READY_COLOR } else { CLEAR_COLOR });
 
-        //encoder.draw(...);
+        if let Some((ref driver, ref ctx)) = driver {
+            driver.gl_draw()(&**ctx, &mut encoder);
+        }
         std::thread::sleep(std::time::Duration::from_millis(10));
 
         encoder.flush(&mut device);
         window.swap_buffers().unwrap();
         device.cleanup();
+    }
+
+    if let Some((driver, ctx)) = driver {
+        driver.gl_cleanup()(ctx);
     }
 }

@@ -7,15 +7,20 @@ use futures;
 use libc::c_void;
 use libloading::{self, Library, Symbol};
 
-use env::{DriverCtx, DriverEnv};
+use env::{self, DriverCtx, DriverEnv};
 
-struct Api<'lib> {
+pub struct Api<'lib> {
     s_driver: Symbol<'lib, extern fn(*mut DriverEnv)>,
     s_version: Symbol<'lib, extern fn() -> u32>,
 }
 
 impl<'lib> Api<'lib> {
     pub unsafe fn new(lib: &'lib Library) -> libloading::Result<Self> {
+        // hack... make sure those symbols will load later
+        let _ = lib.get::<env::GlDrawFn>(b"gl_draw\0")?;
+        let _ = lib.get::<env::GlSetupFn>(b"gl_setup\0")?;
+        let _ = lib.get::<env::GlCleanupFn>(b"gl_cleanup\0")?;
+
         Ok(Api {
             s_driver: lib.get(b"driver\0")?,
             s_version: lib.get(b"version\0")?,
@@ -31,25 +36,41 @@ impl<'lib> Api<'lib> {
     }
 }
 
-pub fn load(path: &Path, comms: Box<DriverComms>) -> libloading::Result<()> {
+// TODO use `rental` to store library in here with the symbols!
+// also figure out a better name
+pub struct Driver(Library);
+
+impl Driver {
+    pub fn gl_draw<'lib>(&'lib self) -> Symbol<'lib, env::GlDrawFn> {
+        unsafe { self.0.get(b"gl_draw\0").unwrap() }
+    }
+
+    pub fn gl_setup<'lib>(&'lib self) -> Symbol<'lib, env::GlSetupFn> {
+        unsafe { self.0.get(b"gl_setup\0").unwrap() }
+    }
+
+    pub fn gl_cleanup<'lib>(&'lib self) -> Symbol<'lib, env::GlCleanupFn> {
+        unsafe { self.0.get(b"gl_cleanup\0").unwrap() }
+    }
+
+    // ought to have a join method that joins up with the driver thread...
+}
+
+pub fn load(path: &Path, comms: Box<DriverComms>) -> libloading::Result<Driver> {
 
     let lib = Library::new(path)?;
-    let api = unsafe { Api::new(&lib)? };
+    {
+        let api = unsafe { Api::new(&lib)? };
 
-    print!("loaded driver ");
-    io::stdout().flush().ok().expect("flush1");
-    println!("v{}", api.version());
-    io::stdout().flush().ok().expect("flush2");
+        print!("loaded driver ");
+        io::stdout().flush().ok().expect("flush1");
+        println!("v{}", api.version());
+        io::stdout().flush().ok().expect("flush2");
 
-    let env = DriverEnv {
-        ctx: DriverCtx(Box::into_raw(comms) as *mut c_void),
-        send_fn: driver_send,
-        try_recv_fn: driver_try_recv,
-        shutdown_fn: driver_shutdown,
-    };
-    api.driver(box env);
-
-    return Ok(())
+        let env = DriverComms::into_env(comms);
+        api.driver(box env);
+    }
+    return Ok(Driver(lib))
 
     // crashes here if any driver code is still being run (because Library is dropped)
 }
@@ -58,6 +79,17 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> libloading::Result<()> {
 pub struct DriverComms {
     pub rx: mpsc::Receiver<Box<[u8]>>,
     pub tx: futures::sync::mpsc::UnboundedSender<Box<[u8]>>,
+}
+
+impl DriverComms {
+    pub fn into_env(comms: Box<DriverComms>) -> DriverEnv {
+        DriverEnv {
+            ctx: DriverCtx(Box::into_raw(comms) as *mut c_void),
+            send_fn: driver_send,
+            try_recv_fn: driver_try_recv,
+            shutdown_fn: driver_shutdown,
+        }
+    }
 }
 
 extern fn driver_send(comms: *mut c_void, buf: *const u8, len: i32) -> i32 {

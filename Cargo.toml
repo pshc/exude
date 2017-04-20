@@ -24,6 +24,7 @@ tokio-io = "0.1"
 
 # driver-specific
 gfx = "0.14"
+gfx_device_gl = "*"
 gfx_window_glutin = "*"
 glutin = "*"
 

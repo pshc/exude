@@ -2,6 +2,8 @@
 
 use std::io::{self, ErrorKind};
 
+use gfx;
+use gfx_device_gl;
 use libc::c_void;
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +16,28 @@ pub enum UpRequest {
 #[derive(Debug, Deserialize, Serialize)]
 pub enum DownResponse {
     Pong(u32),
+}
+
+// future work: macro for generating multiple backends (vulkan, ...)
+#[allow(dead_code)]
+pub type Res = gfx_device_gl::Resources;
+#[allow(dead_code)]
+pub type Command = gfx_device_gl::CommandBuffer;
+
+#[allow(dead_code)]
+pub type ColorFormat = gfx::format::Rgba8;
+
+#[allow(dead_code)]
+pub type GlDrawFn = extern fn(data: &DrawGL, encoder: &mut gfx::Encoder<Res, Command>);
+#[allow(dead_code)]
+pub type GlSetupFn = extern fn(&mut gfx_device_gl::Factory,
+                               Box<gfx::handle::RenderTargetView<gfx_device_gl::Resources, ColorFormat>>)
+                               -> io::Result<Box<DrawGL>>;
+#[allow(dead_code)]
+pub type GlCleanupFn = extern fn(data: Box<DrawGL>);
+
+pub trait DrawGL {
+    fn draw(&self, &mut gfx::Encoder<Res, Command>);
 }
 
 pub struct DriverCtx(pub *mut c_void);
