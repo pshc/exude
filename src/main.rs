@@ -1,8 +1,5 @@
-#![feature(alloc_system, box_syntax, conservative_impl_trait, drop_types_in_const)]
+#![feature(box_syntax, conservative_impl_trait, drop_types_in_const)]
 
-// hack: use alloc_system so the client & driver always share the same allocator...
-//       would be nice to share jemalloc somehow
-extern crate alloc_system;
 extern crate bincode;
 extern crate digest;
 extern crate futures;

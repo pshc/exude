@@ -1,6 +1,5 @@
-#![feature(alloc_system, box_syntax, conservative_impl_trait)]
+#![feature(box_syntax, conservative_impl_trait)]
 
-extern crate alloc_system;
 extern crate bincode;
 #[macro_use]
 extern crate gfx;
