@@ -2,8 +2,8 @@
 
 use std::io;
 
-use gfx;
-use gfx_device_gl;
+use g::gfx;
+use g::gfx_device_gl;
 use libc::c_void;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -25,7 +25,7 @@ pub type ColorFormat = gfx::format::Rgba8;
 
 pub type GlDrawFn = extern fn(data: &DrawGL, encoder: &mut gfx::Encoder<Res, Command>);
 pub type GlSetupFn = extern fn(&mut gfx_device_gl::Factory,
-                               Box<gfx::handle::RenderTargetView<gfx_device_gl::Resources, ColorFormat>>)
+                               gfx::handle::RenderTargetView<gfx_device_gl::Resources, ColorFormat>)
                                -> io::Result<Box<DrawGL>>;
 pub type GlCleanupFn = extern fn(data: Box<DrawGL>);
 

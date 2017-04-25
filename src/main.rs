@@ -34,7 +34,6 @@ use tokio_core::reactor::Core;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use g::gfx;
-use g::gfx_device_gl;
 use g::gfx_window_glutin;
 use g::glutin;
 
@@ -248,10 +247,9 @@ fn main() {
         core.run(client).unwrap();
     });
 
-    // otherwise, we're a client
     type DepthFormat = gfx::format::Depth;
-    const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.1, 1.0];
-    const READY_COLOR: [f32; 4] = [0.0, 0.5, 0.0, 1.0];
+    const SETUP_COLOR: [f32; 4] = [0.3, 0.0, 0.0, 1.0];
+    const READY_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
     let builder = glutin::WindowBuilder::new()
         .with_title("Germ".to_string())
@@ -273,7 +271,7 @@ fn main() {
             println!("driver setup!");
             io::stdout().flush().unwrap();
 
-            let ctx = (loaded.gl_setup())(&mut factory, box main_color.clone()).unwrap();
+            let ctx = (loaded.gl_setup())(&mut factory, main_color.clone()).unwrap();
             driver = Some((loaded, ctx));
         }
 
@@ -294,12 +292,13 @@ fn main() {
             // we should probably forward the events to driver?
         }
 
-        encoder.clear(&main_color, if driver.is_some() { READY_COLOR } else { CLEAR_COLOR });
-
         if let Some((ref driver, ref ctx)) = driver {
+            encoder.clear(&main_color, READY_COLOR);
             driver.gl_draw()(&**ctx, &mut encoder);
+        } else {
+            encoder.clear(&main_color, SETUP_COLOR);
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
 
         encoder.flush(&mut device);
         window.swap_buffers().unwrap();

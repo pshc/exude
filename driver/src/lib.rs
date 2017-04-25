@@ -11,7 +11,7 @@ extern crate serde_derive;
 mod env;
 mod wrapper;
 
-use std::io::{self, Write};
+use std::io::{self, ErrorKind, Write};
 use std::thread;
 
 use g::gfx;
@@ -90,19 +90,19 @@ const TRIANGLE: [Vertex; 3] = [
 #[no_mangle]
 pub extern fn gl_setup(
     factory: &mut gfx_device_gl::Factory,
-    render_target: Box<gfx::handle::RenderTargetView<gfx_device_gl::Resources, env::ColorFormat>>)
+    render_target: gfx::handle::RenderTargetView<gfx_device_gl::Resources, env::ColorFormat>)
     -> io::Result<Box<env::DrawGL>>
 {
     let pso = factory.create_pipeline_simple(
         include_bytes!("shader/triangle_150.glslv"),
         include_bytes!("shader/triangle_150.glslf"),
         pipe::new()
-    ).unwrap(); // xxx
+    ).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
     let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&TRIANGLE, ());
     let data = pipe::Data {
         vbuf: vertex_buffer,
-        out: *render_target
+        out: render_target
     };
 
     Ok(box RenderImpl {
@@ -120,7 +120,8 @@ struct RenderImpl<R: gfx::Resources, M> {
 
 #[no_mangle]
 pub extern fn gl_draw(data: &env::DrawGL, encoder: &mut gfx::Encoder<env::Res, env::Command>) {
-    data.draw(encoder)
+    data.draw(encoder);
+    std::thread::sleep(std::time::Duration::from_millis(10));
 }
 
 impl env::DrawGL for RenderImpl<env::Res, pipe::Meta> {
