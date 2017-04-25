@@ -134,3 +134,10 @@ pub extern fn gl_cleanup(data: Box<env::DrawGL>) {
     drop(data);
     println!("cleaned up GL");
 }
+
+#[allow(dead_code)]
+fn check_gl_types() {
+    let _: env::GlSetupFn = gl_setup;
+    let _: env::GlDrawFn = gl_draw;
+    let _: env::GlCleanupFn = gl_cleanup;
+}
