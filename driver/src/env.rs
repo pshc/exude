@@ -1,11 +1,10 @@
 //! Shared interface between the loader and driver.
 
-use std::io::{self, ErrorKind};
+use std::io;
 
 use gfx;
 use gfx_device_gl;
 use libc::c_void;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum UpRequest {
@@ -57,49 +56,8 @@ pub struct DriverEnv {
     /// On error, returns a negative value.
     pub try_recv_fn: extern fn(*mut c_void, buf_out: *mut *mut u8) -> i32,
 
-    /// Automatically called by `DriverEnv::drop`.
     /// Closes communication channels and frees memory.
     pub shutdown_fn: extern fn(*mut c_void),
-}
-
-impl DriverEnv {
-    #[allow(dead_code)]
-    pub fn send<T: Serialize>(&self, msg: &T) -> io::Result<()> {
-        // so many copies... ugh!
-        let bin = bincoded::Bincoded::new(msg)?;
-        let vec: Vec<u8> = bin.into();
-        assert!(vec.len() <= ::std::i32::MAX as usize);
-        if (self.send_fn)(self.ctx.0, vec.as_ptr(), vec.len() as i32) >= 0 {
-            Ok(())
-        } else {
-            Err(io::Error::new(ErrorKind::BrokenPipe, "send: pipe broken"))
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn try_recv<T: Deserialize>(&self) -> io::Result<Option<T>> {
-        use std::ptr;
-        let mut buf_ptr = ptr::null_mut();
-        let len = (self.try_recv_fn)(self.ctx.0, &mut buf_ptr);
-        if len > 0 {
-            let slice = unsafe { ::std::slice::from_raw_parts(buf_ptr, len as usize) };
-            let result = bincoded::deserialize_exact(slice);
-            unsafe {
-                drop(Box::from_raw(buf_ptr))
-            }
-            result.map(Some)
-        } else if len == 0 {
-            Ok(None)
-        } else {
-            Err(io::Error::new(ErrorKind::BrokenPipe, "try_recv: pipe broken"))
-        }
-    }
-}
-
-impl Drop for DriverEnv {
-    fn drop(&mut self) {
-        (self.shutdown_fn)(self.ctx.0)
-    }
 }
 
 pub mod bincoded {

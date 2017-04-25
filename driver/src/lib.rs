@@ -9,6 +9,7 @@ extern crate serde;
 extern crate serde_derive;
 
 mod env;
+mod wrapper;
 
 use std::io::{self, Write};
 use std::thread;
@@ -24,7 +25,7 @@ pub extern fn version() -> u32 {
 
 #[no_mangle]
 pub extern fn driver(env: *mut env::DriverEnv) {
-    let env = unsafe { Box::from_raw(env) };
+    let env = wrapper::EnvWrapper::wrap(env);
 
     let _input = thread::spawn(move || {
         let stdin = io::stdin();
