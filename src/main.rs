@@ -34,6 +34,7 @@ use tokio_core::reactor::Core;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use g::gfx;
+use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 
@@ -250,6 +251,7 @@ fn main() {
     type DepthFormat = gfx::format::Depth;
     const SETUP_COLOR: [f32; 4] = [0.3, 0.0, 0.0, 1.0];
     const READY_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+    const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
     let builder = glutin::WindowBuilder::new()
         .with_title("Germ".to_string())
@@ -259,6 +261,8 @@ fn main() {
         gfx_window_glutin::init::<env::ColorFormat, DepthFormat>(builder);
 
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
+
+    let mut text = gfx_text::new(factory.clone()).with_size(30).unwrap();
 
     let mut driver = None;
 
@@ -295,10 +299,14 @@ fn main() {
         if let Some((ref driver, ref ctx)) = driver {
             encoder.clear(&main_color, READY_COLOR);
             driver.gl_draw()(&**ctx, &mut encoder);
+            text.add("Active", [10, 10], WHITE);
         } else {
             encoder.clear(&main_color, SETUP_COLOR);
+            text.add("Loading...", [10, 10], WHITE);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+
+        text.draw(&mut encoder, &main_color).unwrap();
 
         encoder.flush(&mut device);
         window.swap_buffers().unwrap();
