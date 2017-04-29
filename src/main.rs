@@ -3,6 +3,7 @@
 extern crate bincode;
 extern crate digest;
 extern crate futures;
+#[macro_use]
 extern crate g;
 extern crate libc;
 extern crate libloading;
@@ -13,6 +14,7 @@ extern crate sha3;
 extern crate tokio_core;
 extern crate tokio_io;
 
+mod basic;
 mod common;
 mod connector;
 #[path="../driver/src/env.rs"]
@@ -249,8 +251,7 @@ fn main() {
     });
 
     type DepthFormat = gfx::format::Depth;
-    const SETUP_COLOR: [f32; 4] = [0.3, 0.0, 0.0, 1.0];
-    const READY_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+    const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
     const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
     let builder = glutin::WindowBuilder::new()
@@ -262,12 +263,15 @@ fn main() {
 
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
 
+    let mut basic_vis = basic::Renderer::new(&mut factory, main_color.clone()).ok()
+        .map(|v| (v, 0.0));
     let mut text = gfx_text::new(factory.clone()).with_size(30).unwrap();
 
     let mut driver = None;
 
     'main: loop {
         if let Ok((path, comms)) = update_rx.try_recv() {
+            basic_vis = None;
 
             println!("loading driver...");
             io::stdout().flush().unwrap();
@@ -296,12 +300,18 @@ fn main() {
             // we should probably forward the events to driver?
         }
 
+
+        encoder.clear(&main_color, BLACK);
         if let Some((ref driver, ref ctx)) = driver {
-            encoder.clear(&main_color, READY_COLOR);
             driver.gl_draw()(&**ctx, &mut encoder);
             text.add("Active", [10, 10], WHITE);
         } else {
-            encoder.clear(&main_color, SETUP_COLOR);
+            if let Some((ref mut vis, ref mut progress)) = basic_vis {
+                *progress += 0.01;
+                let _res = vis.update(&mut factory, *progress);
+                debug_assert_eq!(_res, Ok(()));
+                vis.draw(&mut encoder);
+            }
             text.add("Loading...", [10, 10], WHITE);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
