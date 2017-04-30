@@ -1,0 +1,17 @@
+[package]
+name = "g"
+version = "0.1.0"
+authors = ["Paul Collier <paul@paulcollier.ca>"]
+
+[profile.dev]
+opt-level = 1 # for consistency...?
+
+[dependencies]
+gfx = "0.15.0"
+gfx_device_gl = "*"
+gfx_window_glutin = "*"
+glutin = "*"
+
+[lib]
+crate-type = ["dylib"]
+name = "g"

@@ -1,9 +1,8 @@
-#![feature(box_syntax, conservative_impl_trait)]
+#![feature(box_syntax)]
 
 extern crate bincode;
 #[macro_use]
-extern crate gfx;
-extern crate gfx_device_gl;
+extern crate g;
 extern crate libc;
 extern crate serde;
 #[macro_use]
@@ -14,7 +13,9 @@ mod env;
 use std::io::{self, Write};
 use std::thread;
 
-use gfx::traits::FactoryExt;
+use g::gfx;
+use g::gfx::traits::FactoryExt;
+use g::gfx_device_gl;
 
 #[no_mangle]
 pub extern fn version() -> u32 {

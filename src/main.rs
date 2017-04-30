@@ -3,10 +3,7 @@
 extern crate bincode;
 extern crate digest;
 extern crate futures;
-extern crate gfx;
-extern crate gfx_device_gl;
-extern crate gfx_window_glutin;
-extern crate glutin;
+extern crate g;
 extern crate libc;
 extern crate libloading;
 extern crate serde;
@@ -18,6 +15,7 @@ extern crate tokio_io;
 
 mod common;
 mod connector;
+#[path="../driver/src/env.rs"]
 mod env;
 mod receive;
 
@@ -34,6 +32,11 @@ use gfx::Device;
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
 use tokio_io::{AsyncRead, AsyncWrite};
+
+use g::gfx;
+use g::gfx_device_gl;
+use g::gfx_window_glutin;
+use g::glutin;
 
 use env::bincoded::Bincoded;
 
@@ -125,7 +128,7 @@ struct HashedHeapFile(Vec<u8>, common::Digest);
 impl HashedHeapFile {
     /// Read the currently compiled debug driver into memory.
     fn from_debug_dylib() -> io::Result<Self> {
-        let dylib = concat!(env!("CARGO_MANIFEST_DIR"), "/target/debug/libdriver.dylib");
+        let dylib = concat!(env!("CARGO_MANIFEST_DIR"), "/driver/target/debug/libdriver.dylib");
         let file_len = fs::metadata(dylib)?.len();
         assert!(file_len <= receive::INLINE_MAX as u64);
         let len = file_len as usize;

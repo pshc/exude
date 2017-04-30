@@ -19,12 +19,9 @@ pub enum DownResponse {
 }
 
 // future work: macro for generating multiple backends (vulkan, ...)
-#[allow(dead_code)]
 pub type Res = gfx_device_gl::Resources;
-#[allow(dead_code)]
 pub type Command = gfx_device_gl::CommandBuffer;
 
-#[allow(dead_code)]
 pub type ColorFormat = gfx::format::Rgba8;
 
 #[allow(dead_code)]

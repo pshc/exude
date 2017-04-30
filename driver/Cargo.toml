@@ -1,0 +1,15 @@
+[package]
+name = "driver"
+version = "0.1.0"
+authors = ["Paul Collier <paul@paulcollier.ca>"]
+build = "build.rs"
+
+[lib]
+name = "driver"
+crate-type = ["dylib"]
+
+[dependencies]
+bincode = "1.0.0-alpha7"
+libc = "0.2"
+serde = "0.9"
+serde_derive = "0.9"
