@@ -189,7 +189,7 @@ fn fetch_driver<R: AsyncRead + 'static>(reader: R)
 }
 
 fn main() {
-    let addr = "127.0.0.1:2001".parse().unwrap();
+    let addr: SocketAddr = ([127, 0, 0, 1], 2001).into();
 
     match serve(&addr) {
         Ok(()) => return,
