@@ -22,68 +22,14 @@ pub enum Welcome {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Hello(pub Option<Digest>);
 
-mod digest {
+pub mod digest {
     use std::fmt::{self, Debug, Display, Write};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use serde::de;
 
-    /// Stores a 512-bit hash digest.
-    pub struct Digest(pub [u8; 64]);
+    pub const LEN: usize = 32;
 
-    struct DigestVisitor;
-    impl de::Visitor for DigestVisitor {
-        type Value = Digest;
-
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            write!(f, "a SHAKE256 digest")
-        }
-
-        fn visit_seq<V: de::SeqVisitor>(self, mut visitor: V) -> Result<Self::Value, V::Error> {
-            let mut bytes = [0u8; 64];
-            for i in 0..64 {
-                if let Some(byte) = visitor.visit()? {
-                    bytes[i] = byte
-                } else {
-                    use serde::de::Error;
-                    return Err(V::Error::invalid_length(i, &self))
-                }
-            }
-            Ok(Digest(bytes))
-        }
-    }
-
-    impl Deserialize for Digest {
-        fn deserialize<D: Deserializer>(d: D) -> Result<Self, D::Error> {
-            d.deserialize_seq_fixed_size(64, DigestVisitor)
-        }
-    }
-
-    impl Serialize for Digest {
-        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-            use serde::ser::SerializeSeq;
-            debug_assert_eq!(self.0.len(), 64);
-            let mut seq = s.serialize_seq_fixed_size(64)?;
-            for byte in self.0.iter() {
-                seq.serialize_element(byte)?;
-            }
-            seq.end()
-        }
-    }
-
-    impl Clone for Digest {
-        fn clone(&self) -> Self {
-            let mut bytes = [0u8; 64];
-            bytes.copy_from_slice(&self.0[..]);
-            Digest(bytes)
-        }
-    }
-
-    impl PartialEq for Digest {
-        fn eq(&self, other: &Digest) -> bool {
-            return self.0[..] == other.0[..]
-        }
-    }
-    impl Eq for Digest {}
+    /// Stores a 256-bit hash digest.
+    #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+    pub struct Digest(pub [u8; LEN]);
 
     impl Digest {
         pub fn short_hex(&self) -> String {
@@ -96,15 +42,15 @@ mod digest {
 
         #[cfg(test)]
         pub fn zero() -> Self {
-            Digest([0; 64])
+            Digest([0; LEN])
         }
 
         #[cfg(test)]
         pub fn sample() -> Self {
-            let mut bytes = [0x33; 64];
+            let mut bytes = [0x33; LEN];
             bytes[1] = 0x55;
             bytes[12] = 0x23;
-            bytes[50] = 0xf0;
+            bytes[LEN-2] = 0xf0;
             Digest(bytes)
         }
     }
@@ -126,9 +72,9 @@ mod digest {
 
     #[test]
     fn hex() {
-        let digest = Digest([0xff; 64]);
+        let digest = Digest([0xff; LEN]);
         let hex = format!("{}", digest);
-        assert_eq!(hex.len(), 128);
+        assert_eq!(hex.len(), LEN*2);
         for b in hex.bytes() {
             assert_eq!(b, b'f');
         }
@@ -162,7 +108,7 @@ mod digest {
 
         let orig = Digest::sample();
         let coded = Bincoded::new(&orig).unwrap();
-        assert_eq!(coded.as_ref().len(), 64);
+        assert_eq!(coded.as_ref().len(), LEN);
         assert_eq!(&orig.0[..], coded.as_ref());
     }
 }

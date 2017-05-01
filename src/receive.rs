@@ -83,21 +83,21 @@ fn test_repo_path() {
 pub mod utils {
     use std::fmt;
     use std::time::{Duration, Instant};
-    use sha3::Shake256;
+    use sha3::Shake128;
     use digest::{Input, VariableOutput};
 
     use common;
 
-    /// Hash a byte slice to our concrete 512-bit Digest type.
+    /// Hash a byte slice to our concrete 256-bit Digest type.
     ///
     /// This is temporary; we usually want to hash as data streams in, without waiting to buffer.
     pub fn digest_from_bytes(bytes: &[u8]) -> common::Digest {
 
         let before = Instant::now();
 
-        let mut hasher = Shake256::default();
+        let mut hasher = Shake128::default();
         hasher.digest(bytes);
-        let mut result = [0u8; 64];
+        let mut result = [0u8; common::digest::LEN];
         hasher.variable_result(&mut result).unwrap();
         let digest = common::Digest(result);
 
