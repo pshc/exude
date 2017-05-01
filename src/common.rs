@@ -23,7 +23,8 @@ pub enum Welcome {
 pub struct Hello(pub Option<Digest>);
 
 pub mod digest {
-    use std::fmt::{self, Debug, Display, Write};
+    use std::fmt::{self, Debug, Display};
+    use std::str;
 
     pub const LEN: usize = 32;
 
@@ -32,12 +33,21 @@ pub mod digest {
     pub struct Digest(pub [u8; LEN]);
 
     impl Digest {
-        pub fn short_hex(&self) -> String {
-            let mut hex = String::with_capacity(12);
-            for octet in self.0.iter().take(6) {
-                write!(hex, "{:02x}", octet).unwrap();
+        /// Always returns valid ASCII.
+        pub fn hex_bytes(&self) -> [u8; LEN*2] {
+            let mut ascii = [b'x'; LEN*2];
+            static HEX: &[u8] = b"0123456789abcdef";
+            for (i, octet) in self.0.iter().enumerate() {
+                ascii[i*2] = HEX[(octet >> 4) as usize];
+                ascii[i*2+1] = HEX[(octet & 0x0f) as usize];
             }
-            hex
+            ascii
+        }
+
+        pub fn short_hex(&self) -> String {
+            let ascii = self.hex_bytes();
+            let hex = unsafe { str::from_utf8_unchecked(&ascii[..12]) };
+            hex.to_owned()
         }
 
         #[cfg(test)]
@@ -63,10 +73,9 @@ pub mod digest {
 
     impl Display for Digest {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            for octet in self.0.iter() {
-                write!(f, "{:02x}", octet)?;
-            }
-            Ok(())
+            let ascii = self.hex_bytes();
+            let hex = unsafe { str::from_utf8_unchecked(&ascii) };
+            f.write_str(&hex)
         }
     }
 

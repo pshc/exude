@@ -1,6 +1,7 @@
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use std::str;
 
 use futures::Future;
 use futures::future;
@@ -23,8 +24,8 @@ pub fn verify_and_save<R: AsyncRead + 'static>(len: usize, digest: Digest, reade
     }
 
     let mut path = repo_path().to_owned();
-    // i feel like we could avoid constructing a string here...
-    path.push(format!("{}", digest));
+    let hex = digest.hex_bytes();
+    path.push(unsafe { str::from_utf8_unchecked(&hex) });
 
     // xxx--don't buffer! stream into another thread
     let mut buf = Vec::with_capacity(len);
