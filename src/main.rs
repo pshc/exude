@@ -1,6 +1,5 @@
 #![feature(box_syntax, conservative_impl_trait, drop_types_in_const)]
 
-extern crate bincode;
 extern crate digest;
 extern crate futures;
 #[macro_use]
@@ -19,6 +18,8 @@ mod common;
 mod connector;
 #[path="../driver/src/env.rs"]
 mod env;
+#[path="../proto/mod.rs"]
+mod proto;
 mod receive;
 
 use std::fs::{self, File};
@@ -40,7 +41,7 @@ use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 
-use env::bincoded::Bincoded;
+use proto::{Bincoded, Digest};
 
 
 /// hopefully replace with `?` later
@@ -125,7 +126,7 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=
 
 /// The bytes and hash digest of a file stored on the heap.
 #[derive(Debug)]
-struct HashedHeapFile(Vec<u8>, common::Digest);
+struct HashedHeapFile(Vec<u8>, Digest);
 
 impl HashedHeapFile {
     /// Read the currently compiled debug driver into memory.
@@ -164,7 +165,7 @@ impl HashedHeapFile {
 
 /// Downloads the newest driver (if needed), returning its path.
 fn fetch_driver<R: AsyncRead + 'static>(reader: R)
-    -> Box<Future<Item=(R, common::Digest, PathBuf), Error=io::Error>>
+    -> Box<Future<Item=(R, Digest, PathBuf), Error=io::Error>>
 {
     box common::read_bincoded(reader)
       .and_then(|(reader, welcome)| {

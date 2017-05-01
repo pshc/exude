@@ -4,7 +4,7 @@ use std::ptr;
 use serde::{Deserialize, Serialize};
 
 use env::DriverEnv;
-use env::bincoded::{self, Bincoded};
+use proto::bincoded::{self, Bincoded};
 
 pub struct EnvWrapper(Box<DriverEnv>);
 

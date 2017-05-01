@@ -7,7 +7,7 @@ use futures::Future;
 use futures::future;
 use tokio_io::{self, AsyncRead};
 
-use common::Digest;
+use proto::Digest;
 
 /// Maximum byte length of an InlineDriver payload.
 pub static INLINE_MAX: usize = 100_000_000;
@@ -87,20 +87,20 @@ pub mod utils {
     use sha3::Shake128;
     use digest::{Input, VariableOutput};
 
-    use common;
+    use proto::{Digest, digest};
 
     /// Hash a byte slice to our concrete 256-bit Digest type.
     ///
     /// This is temporary; we usually want to hash as data streams in, without waiting to buffer.
-    pub fn digest_from_bytes(bytes: &[u8]) -> common::Digest {
+    pub fn digest_from_bytes(bytes: &[u8]) -> Digest {
 
         let before = Instant::now();
 
         let mut hasher = Shake128::default();
         hasher.digest(bytes);
-        let mut result = [0u8; common::digest::LEN];
+        let mut result = [0u8; digest::LEN];
         hasher.variable_result(&mut result).unwrap();
-        let digest = common::Digest(result);
+        let digest = Digest(result);
 
         println!("hashed {}kb in {}: {}", bytes.len()/1000, PrettyDuration(&before.elapsed()),
                 digest.short_hex());

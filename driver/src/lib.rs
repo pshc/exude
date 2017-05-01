@@ -1,6 +1,5 @@
 #![feature(box_syntax)]
 
-extern crate bincode;
 #[macro_use]
 extern crate g;
 extern crate libc;
@@ -9,6 +8,8 @@ extern crate serde;
 extern crate serde_derive;
 
 mod env;
+#[path="../../proto/mod.rs"]
+mod proto;
 mod wrapper;
 
 use std::io::{self, ErrorKind, Write};
