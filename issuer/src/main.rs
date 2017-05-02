@@ -183,7 +183,6 @@ fn sign() -> io::Result<()> {
     let root_path = root_path;
 
     let mut driver_path = root_path.clone();
-    driver_path.push("driver");
     driver_path.push("target");
     driver_path.push("debug"); // xxx
     driver_path.push("libdriver.dylib"); // xxx

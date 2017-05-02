@@ -1,14 +1,13 @@
 [package]
-name = "driver"
-version = "0.1.0"
 authors = ["Paul Collier <paul@paulcollier.ca>"]
-
-[lib]
-name = "driver"
-crate-type = ["dylib"]
+name = "server"
+publish = false
+version = "0.1.0"
 
 [dependencies]
 bincode = "1.0.0-alpha7"
-libc = "0.2"
+futures = "0.1"
 serde = "0.9"
 serde_derive = "0.9"
+tokio-core = "0.1"
+tokio-io = "0.1"

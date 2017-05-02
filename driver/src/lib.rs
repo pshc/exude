@@ -18,6 +18,7 @@ use std::thread;
 use g::{DrawGL, Encoder, Res, gfx};
 use g::gfx::traits::FactoryExt;
 use g::gfx_device_gl;
+use proto::api;
 
 #[no_mangle]
 pub extern fn version() -> u32 {
@@ -33,7 +34,7 @@ pub extern fn driver(env: *mut env::DriverEnv) {
         let mut stdout = io::stdout();
         let mut line = String::new();
         loop {
-            match env.try_recv::<env::DownResponse>() {
+            match env.try_recv::<api::DownResponse>() {
                 Ok(None) => (),
                 Ok(Some(resp)) => {
                     println!("=== {:?} ===", resp);
@@ -62,7 +63,7 @@ pub extern fn driver(env: *mut env::DriverEnv) {
 
             if let Ok(n) = line.parse::<u32>() {
                 println!("n: {}", n);
-                env.send(&env::UpRequest::Ping(n)).unwrap();
+                env.send(&api::UpRequest::Ping(n)).unwrap();
             }
         }
 

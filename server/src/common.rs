@@ -10,6 +10,10 @@ use tokio_io::{self, AsyncRead, AsyncWrite};
 
 use proto::{Bincoded, Digest, DriverInfo};
 
+
+/// Maximum byte length of an InlineDriver payload.
+pub static INLINE_MAX: usize = 100_000_000;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Welcome {
     Current,

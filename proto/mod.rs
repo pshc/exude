@@ -1,3 +1,4 @@
+pub mod api;
 pub mod bincoded;
 pub mod digest;
 pub mod driver_info;

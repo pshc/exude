@@ -1,7 +1,8 @@
+[workspace]
+
 [package]
 authors = ["Paul Collier <paul@paulcollier.ca>"]
 name = "exude"
-build = "build.rs"
 publish = false
 version = "0.1.0"
 
@@ -9,17 +10,8 @@ version = "0.1.0"
 opt-level = 1 # faster hashing
 
 [dependencies]
-bincode = "1.0.0-alpha7"
-digest = "0.5"
-serde = "0.9"
-serde_derive = "0.9"
-
-# client/server specific
-futures = "0.1"
-futures-cpupool = "0.1"
-libc = "*"
-libloading = "0.3.2"
-sha3 = "0.5"
-sodiumoxide = "0.0.14"
-tokio-core = "0.1"
-tokio-io = "0.1"
+client = { path = "client" }
+driver = { path = "driver" }
+g = { path = "g" }
+issuer = { path = "issuer" }
+server = { path = "server" }
