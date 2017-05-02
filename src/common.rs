@@ -20,12 +20,13 @@ pub enum Welcome {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Hello(pub Option<Digest>);
 
+/// No `Send` needed.
+pub type IoFuture<T> = Box<Future<Item=T, Error=io::Error>>;
+
 /// Reads a 16-bit length header and then bytes asynchronously.
-pub fn read_with_length<R: AsyncRead>(reader: R)
--> impl Future<Item=(R, Vec<u8>), Error=io::Error>
-{
+pub fn read_with_length<R: AsyncRead + 'static>(reader: R) -> IoFuture<(R, Vec<u8>)> {
     let buf = [0u8, 0];
-    tokio_io::io::read_exact(reader, buf).and_then(|(reader, len_buf)| {
+    box tokio_io::io::read_exact(reader, buf).and_then(|(reader, len_buf)| {
         let len = ((len_buf[0] as usize) << 8) | len_buf[1] as usize;
         let mut buf = Vec::with_capacity(len);
         unsafe {
@@ -36,10 +37,12 @@ pub fn read_with_length<R: AsyncRead>(reader: R)
 }
 
 /// Reads a 16-bit length header and then buffers and deserializes bytes.
-pub fn read_bincoded<R: AsyncRead, T: Deserialize>(reader: R)
--> impl Future<Item=(R, T), Error=io::Error>
+pub fn read_bincoded<R, T>(reader: R) -> IoFuture<(R, T)>
+where
+    R: AsyncRead + 'static,
+    T: Deserialize + 'static,
 {
-    read_with_length(reader).and_then(|(reader, vec)| {
+    box read_with_length(reader).and_then(|(reader, vec)| {
         let bincoded = unsafe { Bincoded::<T>::from_vec(vec) };
         match bincoded.deserialize() {
             Ok(val) => Ok((reader, val)),
@@ -51,11 +54,13 @@ pub fn read_bincoded<R: AsyncRead, T: Deserialize>(reader: R)
 /// Write a 16-bit length header, and then the bytes asynchronously.
 ///
 /// The future returns `(write_half, vec)`.
-pub fn write_with_length<W: AsyncWrite, V: AsRef<[u8]>>(writer: W, vec: V)
--> impl Future<Item=(W, V), Error=io::Error>
+pub fn write_with_length<W, V>(writer: W, vec: V) -> IoFuture<(W, V)>
+where
+    W: AsyncWrite + 'static,
+    V: AsRef<[u8]> + 'static,
 {
     let len = vec.as_ref().len();
-    future::lazy(move || {
+    box future::lazy(move || {
         if len <= 0xffff {
             Ok([(len >> 8) as u8, len as u8])
         } else {
@@ -67,11 +72,13 @@ pub fn write_with_length<W: AsyncWrite, V: AsRef<[u8]>>(writer: W, vec: V)
 }
 
 /// Write a 16-bit length header, and then the serialized bytes.
-pub fn write_bincoded<W: AsyncWrite + 'static, T: Serialize + 'static>(writer: W, value: &T)
--> Box<Future<Item=(W, Bincoded<T>), Error=io::Error>>
+pub fn write_bincoded<W, T>(writer: W, value: &T) -> IoFuture<(W, Bincoded<T>)>
+where
+    W: AsyncWrite + 'static,
+    T: Serialize + 'static,
 {
     match Bincoded::new(value) {
-        Ok(bincoded) => box write_with_length(writer, bincoded),
+        Ok(bincoded) => write_with_length(writer, bincoded),
         Err(e) => box future::err(io::Error::new(ErrorKind::InvalidInput, e))
     }
 }

@@ -1,4 +1,4 @@
-#![feature(box_syntax, conservative_impl_trait, drop_types_in_const)]
+#![feature(box_syntax, drop_types_in_const)]
 
 extern crate digest;
 extern crate futures;
@@ -43,7 +43,7 @@ use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 
-use common::Welcome;
+use common::{IoFuture, Welcome};
 use proto::{Bincoded, DriverInfo};
 
 
@@ -82,7 +82,7 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=
     let (r, w) = sock.split();
     let hello = common::read_bincoded(r);
 
-    box hello.and_then(move |(r, hello)| -> Box<Future<Item=_, Error=io::Error>> {
+    box hello.and_then(move |(r, hello)| -> IoFuture<_> {
         println!("{} is here: {:?}", addr, hello);
 
         match hello {
@@ -104,17 +104,17 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=
         loop_fn(rw, move |(r, w)| {
 
             let read_req = common::read_bincoded(r);
-            let dispatch_req = read_req.and_then(move |(r, req)| {
+            let dispatch_req = read_req.and_then(move |(r, req)| -> IoFuture<_> {
                 match req {
                     env::UpRequest::Ping(n) => {
                         println!("{} pinged ({})", addr, n);
 
-                        Either::A(common::write_bincoded(w, &env::DownResponse::Pong(n))
-                            .and_then(move |(w, _)| Ok(Loop::Continue((r, w)))))
+                        box common::write_bincoded(w, &env::DownResponse::Pong(n))
+                            .and_then(move |(w, _)| Ok(Loop::Continue((r, w))))
                     }
                     env::UpRequest::Bye => {
                         println!("{} says bye", addr);
-                        Either::B(Ok(Loop::Break(())).into_future())
+                        box futures::future::ok(Loop::Break(()))
                     }
                 }
             });
@@ -167,13 +167,13 @@ impl HashedHeapFile {
     }
 
     /// Write an InlineDriver header and then the bytes.
-    fn write_to<W: AsyncWrite>(self, w: W) -> impl Future<Item=W, Error=io::Error> {
+    fn write_to<W: AsyncWrite + 'static>(self, w: W) -> IoFuture<W> {
         let HashedHeapFile(buf, info) = self;
         assert!(buf.len() < receive::INLINE_MAX);
         let resp = Welcome::InlineDriver(info);
         let coded = Bincoded::new(&resp);
 
-        futures::future::lazy(|| coded)
+        box futures::future::lazy(|| coded)
             .and_then(move |coded| common::write_with_length(w, coded))
             .and_then(move |(w, _)| tokio_io::io::write_all(w, buf))
             .and_then(move |(w, _)| Ok(w))
@@ -181,9 +181,7 @@ impl HashedHeapFile {
 }
 
 /// Downloads the newest driver (if needed), returning its path.
-fn fetch_driver<R: AsyncRead + 'static>(reader: R)
-    -> Box<Future<Item=(R, Box<DriverInfo>, PathBuf), Error=io::Error>>
-{
+fn fetch_driver<R: AsyncRead + 'static>(reader: R) -> IoFuture<(R, Box<DriverInfo>, PathBuf)> {
     box common::read_bincoded(reader)
       .and_then(|(reader, welcome)| {
 
@@ -252,11 +250,8 @@ fn main() {
 
                 let write = rx
                 .map_err(|()| io::Error::new(ErrorKind::BrokenPipe, "core: done writing"))
-                // TEMP: explicit type and box to avoid ICE
-                .fold(w, |w, msg|
-                    -> Box<Future<Item=tokio_io::io::WriteHalf<TcpStream>, Error=io::Error>>
-                {
-                    box common::write_with_length(w, msg).map(|(w, _)| w)
+                .fold(w, |w, msg| {
+                    common::write_with_length(w, msg).map(|(w, _)| w)
                 })
                 .map(|_| println!("write: donezo"));
 

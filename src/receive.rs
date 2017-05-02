@@ -9,6 +9,7 @@ use futures_cpupool::CpuPool;
 use sodiumoxide::crypto::sign;
 use tokio_io::{self, AsyncRead};
 
+use common::IoFuture;
 use proto::DriverInfo;
 
 /// Maximum byte length of an InlineDriver payload.
@@ -18,10 +19,8 @@ pub static INLINE_MAX: usize = 100_000_000;
 pub static PUBLIC_KEY: sign::PublicKey = sign::PublicKey(*include_bytes!("../issuer/cred/public"));
 
 /// Intended for inline downloads only; use a smart HTTP client for larger downloads.
-///
-/// Temporary: return type is boxed instead of `impl Future` due to rust ICE #37096
 pub fn verify_and_save<R: AsyncRead + 'static>(info: Box<DriverInfo>, reader: R)
-    -> Box<Future<Item=(R, Box<DriverInfo>, PathBuf), Error=io::Error>>
+    -> IoFuture<(R, Box<DriverInfo>, PathBuf)>
 {
     let len = info.len;
     if len > INLINE_MAX {
