@@ -5,6 +5,7 @@ use std::str;
 
 use futures::Future;
 use futures::future;
+use futures_cpupool::CpuPool;
 use tokio_io::{self, AsyncRead};
 
 use proto::DriverInfo;
@@ -28,24 +29,26 @@ pub fn verify_and_save<R: AsyncRead + 'static>(info: Box<DriverInfo>, reader: R)
     let hex = info.digest.hex_bytes();
     path.push(unsafe { str::from_utf8_unchecked(&hex) });
 
-    // xxx--don't buffer! stream into another thread
+    // xxx not a fan of reading the whole thing into memory... we could mmap?
     let mut buf = Vec::with_capacity(len);
     unsafe {
         buf.set_len(len);
     }
     box tokio_io::io::read_exact(reader, buf).and_then(|(reader, buf)| {
-        let checked_digest = utils::digest_from_bytes(&buf[..]);
-        if info.digest != checked_digest {
-            let err = io::Error::new(ErrorKind::InvalidData, "hash check failed");
-            return Err(err)
-        }
+        let pool = CpuPool::new(1);
+        pool.spawn(future::lazy(move || {
+            let checked_digest = utils::digest_from_bytes(&buf[..]);
+            if info.digest != checked_digest {
+                let err = io::Error::new(ErrorKind::InvalidData, "hash check failed");
+                return Err(err)
+            }
 
-        // xxx we'll just write synchronously to start
-        let mut file = File::create(&path)?;
-        file.write_all(&buf)?;
-        file.sync_data()?;
+            let mut file = File::create(&path)?;
+            file.write_all(&buf)?;
+            file.sync_data()?;
 
-        Ok((reader, info, path))
+            Ok((info, path))
+        })).map(|(info, path)| { (reader, info, path) })
     })
 }
 

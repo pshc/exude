@@ -2,6 +2,7 @@
 
 extern crate digest;
 extern crate futures;
+extern crate futures_cpupool;
 #[macro_use]
 extern crate g;
 extern crate libc;

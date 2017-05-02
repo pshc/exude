@@ -17,6 +17,7 @@ serde_derive = "0.9"
 
 # client/server specific
 futures = "0.1"
+futures-cpupool = "0.1"
 libc = "*"
 libloading = "0.3.2"
 sha3 = "0.5"
