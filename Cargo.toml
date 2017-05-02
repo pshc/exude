@@ -10,7 +10,6 @@ opt-level = 1 # faster hashing
 
 [dependencies]
 bincode = "1.0.0-alpha7"
-byteorder = "1.0.0"
 digest = "0.5"
 serde = "0.9"
 serde_derive = "0.9"
