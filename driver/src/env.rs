@@ -1,9 +1,5 @@
 //! Shared interface between the loader and driver.
 
-use std::io;
-
-use g::gfx;
-use g::gfx_device_gl;
 use libc::c_void;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -15,22 +11,6 @@ pub enum UpRequest {
 #[derive(Debug, Deserialize, Serialize)]
 pub enum DownResponse {
     Pong(u32),
-}
-
-// future work: macro for generating multiple backends (vulkan, ...)
-pub type Res = gfx_device_gl::Resources;
-pub type Command = gfx_device_gl::CommandBuffer;
-
-pub type ColorFormat = gfx::format::Rgba8;
-
-pub type GlDrawFn = extern fn(data: &DrawGL, encoder: &mut gfx::Encoder<Res, Command>);
-pub type GlSetupFn = extern fn(&mut gfx_device_gl::Factory,
-                               gfx::handle::RenderTargetView<gfx_device_gl::Resources, ColorFormat>)
-                               -> io::Result<Box<DrawGL>>;
-pub type GlCleanupFn = extern fn(data: Box<DrawGL>);
-
-pub trait DrawGL {
-    fn draw(&self, &mut gfx::Encoder<Res, Command>);
 }
 
 pub struct DriverCtx(pub *mut c_void);

@@ -15,7 +15,7 @@ mod wrapper;
 use std::io::{self, ErrorKind, Write};
 use std::thread;
 
-use g::gfx;
+use g::{DrawGL, Encoder, Res, gfx};
 use g::gfx::traits::FactoryExt;
 use g::gfx_device_gl;
 
@@ -78,7 +78,7 @@ gfx_defines! {
 
     pipeline pipe {
         vbuf: gfx::VertexBuffer<Vertex> = (),
-        out: gfx::RenderTarget<env::ColorFormat> = "Target0",
+        out: gfx::RenderTarget<g::ColorFormat> = "Target0",
     }
 }
 
@@ -91,8 +91,8 @@ const TRIANGLE: [Vertex; 3] = [
 #[no_mangle]
 pub extern fn gl_setup(
     factory: &mut gfx_device_gl::Factory,
-    render_target: gfx::handle::RenderTargetView<gfx_device_gl::Resources, env::ColorFormat>)
-    -> io::Result<Box<env::DrawGL>>
+    render_target: g::RenderTargetView)
+    -> io::Result<Box<g::DrawGL>>
 {
     let pso = factory.create_pipeline_simple(
         include_bytes!("shader/triangle_150.glslv"),
@@ -120,26 +120,26 @@ struct RenderImpl<R: gfx::Resources, M> {
 }
 
 #[no_mangle]
-pub extern fn gl_draw(data: &env::DrawGL, encoder: &mut gfx::Encoder<env::Res, env::Command>) {
+pub extern fn gl_draw(data: &DrawGL, encoder: &mut Encoder) {
     data.draw(encoder);
     std::thread::sleep(std::time::Duration::from_millis(10));
 }
 
-impl env::DrawGL for RenderImpl<env::Res, pipe::Meta> {
-    fn draw(&self, mut encoder: &mut gfx::Encoder<env::Res, env::Command>) {
+impl DrawGL for RenderImpl<Res, pipe::Meta> {
+    fn draw(&self, mut encoder: &mut Encoder) {
         encoder.draw(&self.slice, &self.pso, &self.data)
     }
 }
 
 #[no_mangle]
-pub extern fn gl_cleanup(data: Box<env::DrawGL>) {
+pub extern fn gl_cleanup(data: Box<DrawGL>) {
     drop(data);
     println!("cleaned up GL");
 }
 
 #[allow(dead_code)]
 fn check_gl_types() {
-    let _: env::GlSetupFn = gl_setup;
-    let _: env::GlDrawFn = gl_draw;
-    let _: env::GlCleanupFn = gl_cleanup;
+    let _: g::GlSetupFn = gl_setup;
+    let _: g::GlDrawFn = gl_draw;
+    let _: g::GlCleanupFn = gl_cleanup;
 }

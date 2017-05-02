@@ -1,6 +1,6 @@
 use std::io::{self, ErrorKind};
 
-use env;
+use g::{ColorFormat, Encoder, RenderTargetView, Res};
 use g::gfx::{self, IntoIndexBuffer};
 use g::gfx::traits::{Factory, FactoryExt};
 use g::gfx_device_gl;
@@ -13,7 +13,7 @@ gfx_defines! {
 
     pipeline basic {
         vbuf: gfx::VertexBuffer<Vertex> = (),
-        out: gfx::RenderTarget<env::ColorFormat> = "Target0",
+        out: gfx::RenderTarget<ColorFormat> = "Target0",
     }
 }
 
@@ -27,10 +27,10 @@ pub struct Renderer<R: gfx::Resources, M> {
     data: basic::Data<R>,
 }
 
-impl Renderer<env::Res, basic::Meta> {
+impl Renderer<Res, basic::Meta> {
     pub fn new(
         factory: &mut gfx_device_gl::Factory,
-        render_target: gfx::handle::RenderTargetView<gfx_device_gl::Resources, env::ColorFormat>)
+        render_target: RenderTargetView)
         -> io::Result<Self>
     {
         let pso = factory.create_pipeline_simple(VERTEX_SHADER, FRAGMENT_SHADER, basic::new())
@@ -74,7 +74,7 @@ impl Renderer<env::Res, basic::Meta> {
         Ok(())
     }
 
-    pub fn draw(&self, mut encoder: &mut gfx::Encoder<env::Res, env::Command>) {
+    pub fn draw(&self, mut encoder: &mut Encoder) {
         encoder.draw(&self.slice, &self.pso, &self.data);
     }
 }

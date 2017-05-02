@@ -7,7 +7,8 @@ use futures;
 use libc::c_void;
 use libloading::{self, Library, Symbol};
 
-use env::{self, DriverCtx, DriverEnv};
+use env::{DriverCtx, DriverEnv};
+use g;
 
 pub struct Api<'lib> {
     s_driver: Symbol<'lib, extern fn(*mut DriverEnv)>,
@@ -17,9 +18,9 @@ pub struct Api<'lib> {
 impl<'lib> Api<'lib> {
     pub unsafe fn new(lib: &'lib Library) -> libloading::Result<Self> {
         // hack... make sure those symbols will load later
-        let _ = lib.get::<env::GlDrawFn>(b"gl_draw\0")?;
-        let _ = lib.get::<env::GlSetupFn>(b"gl_setup\0")?;
-        let _ = lib.get::<env::GlCleanupFn>(b"gl_cleanup\0")?;
+        let _ = lib.get::<g::GlDrawFn>(b"gl_draw\0")?;
+        let _ = lib.get::<g::GlSetupFn>(b"gl_setup\0")?;
+        let _ = lib.get::<g::GlCleanupFn>(b"gl_cleanup\0")?;
 
         Ok(Api {
             s_driver: lib.get(b"driver\0")?,
@@ -41,15 +42,15 @@ impl<'lib> Api<'lib> {
 pub struct Driver(Library);
 
 impl Driver {
-    pub fn gl_draw<'lib>(&'lib self) -> Symbol<'lib, env::GlDrawFn> {
+    pub fn gl_draw<'lib>(&'lib self) -> Symbol<'lib, g::GlDrawFn> {
         unsafe { self.0.get(b"gl_draw\0").unwrap() }
     }
 
-    pub fn gl_setup<'lib>(&'lib self) -> Symbol<'lib, env::GlSetupFn> {
+    pub fn gl_setup<'lib>(&'lib self) -> Symbol<'lib, g::GlSetupFn> {
         unsafe { self.0.get(b"gl_setup\0").unwrap() }
     }
 
-    pub fn gl_cleanup<'lib>(&'lib self) -> Symbol<'lib, env::GlCleanupFn> {
+    pub fn gl_cleanup<'lib>(&'lib self) -> Symbol<'lib, g::GlCleanupFn> {
         unsafe { self.0.get(b"gl_cleanup\0").unwrap() }
     }
 

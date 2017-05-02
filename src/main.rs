@@ -276,7 +276,7 @@ fn main() {
         .with_dimensions(1024, 768)
         .with_vsync();
     let (window, mut device, mut factory, mut main_color, mut main_depth) =
-        gfx_window_glutin::init::<env::ColorFormat, DepthFormat>(builder);
+        gfx_window_glutin::init::<g::ColorFormat, DepthFormat>(builder);
 
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
 
