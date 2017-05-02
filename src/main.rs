@@ -11,6 +11,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate sha3;
+extern crate sodiumoxide;
 extern crate tokio_core;
 extern crate tokio_io;
 
@@ -23,7 +24,7 @@ mod env;
 mod proto;
 mod receive;
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -43,7 +44,7 @@ use g::gfx_window_glutin;
 use g::glutin;
 
 use common::Welcome;
-use proto::{Bincoded, Digest, DriverInfo};
+use proto::{Bincoded, DriverInfo};
 
 
 /// hopefully replace with `?` later
@@ -87,7 +88,7 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=
         match hello {
             common::Hello(None) => {
                 // send them the up-to-date driver
-                let driver = try_box!(HashedHeapFile::from_debug_dylib());
+                let driver = try_box!(HashedHeapFile::read_latest());
                 box driver.write_to(w).and_then(move |w| {
                     Ok((r, w))
                 })
@@ -128,33 +129,47 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=
 
 /// The bytes and hash digest of a file stored on the heap.
 #[derive(Debug)]
-struct HashedHeapFile(Vec<u8>, Digest);
+struct HashedHeapFile(Vec<u8>, DriverInfo);
 
 impl HashedHeapFile {
-    /// Read the currently compiled debug driver into memory.
-    fn from_debug_dylib() -> io::Result<Self> {
-        let dylib = concat!(env!("CARGO_MANIFEST_DIR"), "/driver/target/debug/libdriver.dylib");
-        let file_len = fs::metadata(dylib)?.len();
-        assert!(file_len <= receive::INLINE_MAX as u64);
-        let len = file_len as usize;
-        let mut file = File::open(dylib)?;
+    /// Read the latest signed driver into memory.
+    fn read_latest() -> io::Result<Self> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let bin_path = root.join("latest.bin");
+        let meta_path = root.join("latest.meta");
+
+        let mut meta_vec = Vec::new();
+        assert!(File::open(meta_path)?.read_to_end(&mut meta_vec)? > 0);
+        let info: DriverInfo = unsafe { Bincoded::from_vec(meta_vec) }.deserialize()?;
+        let len = info.len;
+
+        assert!(info.len <= receive::INLINE_MAX);
         let mut driver_buf = Vec::with_capacity(len);
         unsafe {
             driver_buf.set_len(len);
         }
-        file.read_exact(&mut driver_buf)?;
+        let mut bin = File::open(bin_path)?;
+        bin.read_exact(&mut driver_buf)?;
+        if bin.read(&mut [0])? > 0 {
+            return Err(io::Error::new(ErrorKind::InvalidData, "latest bin is wrong length"));
+        }
+        drop(bin);
 
-        // xxx don't rehash every time durr
-        let digest = receive::utils::digest_from_bytes(&driver_buf[..]);
+        // let's double check the digest (until we have a more reliable setup)
+        {
+            let digest = receive::utils::digest_from_bytes(&driver_buf[..]);
+            if digest != info.digest {
+                return Err(io::Error::new(ErrorKind::InvalidData, "latest digest is wrong"));
+            }
+        }
 
-        Ok(HashedHeapFile(driver_buf, digest))
+        Ok(HashedHeapFile(driver_buf, info))
     }
 
     /// Write an InlineDriver header and then the bytes.
     fn write_to<W: AsyncWrite>(self, w: W) -> impl Future<Item=W, Error=io::Error> {
-        let HashedHeapFile(buf, digest) = self;
+        let HashedHeapFile(buf, info) = self;
         assert!(buf.len() < receive::INLINE_MAX);
-        let info = DriverInfo {len: buf.len(), digest: digest};
         let resp = Welcome::InlineDriver(info);
         let coded = Bincoded::new(&resp);
 
@@ -182,7 +197,7 @@ fn fetch_driver<R: AsyncRead + 'static>(reader: R)
                 Either::A(download)
             }
             Welcome::DownloadDriver(url, info) => {
-                println!("TODO download {} and check {}", url, info.digest);
+                println!("TODO download {} and check {} and SIG", url, info.digest);
                 let download = io::Error::new(ErrorKind::Other, "todo download");
                 Either::B(Err(download).into_future())
             }

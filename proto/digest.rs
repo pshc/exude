@@ -1,6 +1,8 @@
 use std::fmt::{self, Debug, Display};
 use std::str;
 
+use super::HEX_CHARS;
+
 pub const LEN: usize = 32;
 
 /// Stores a 256-bit hash digest.
@@ -11,10 +13,9 @@ impl Digest {
     /// Always returns valid ASCII.
     pub fn hex_bytes(&self) -> [u8; LEN*2] {
         let mut ascii = [b'x'; LEN*2];
-        static HEX: &[u8] = b"0123456789abcdef";
         for (i, octet) in self.0.iter().enumerate() {
-            ascii[i*2] = HEX[(octet >> 4) as usize];
-            ascii[i*2+1] = HEX[(octet & 0x0f) as usize];
+            ascii[i*2] = HEX_CHARS[(octet >> 4) as usize];
+            ascii[i*2+1] = HEX_CHARS[(octet & 0x0f) as usize];
         }
         ascii
     }

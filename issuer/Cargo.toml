@@ -1,0 +1,14 @@
+[package]
+authors = ["Paul Collier <paul@paulcollier.ca>"]
+name = "issuer"
+publish = false
+version = "0.1.0"
+
+[dependencies]
+bincode = "1.0.0-alpha7"
+digest = "0.5"
+rpassword = "0.4.0"
+serde = "0.9"
+serde_derive = "0.9"
+sha3 = "0.5.0"
+sodiumoxide = "0.0.14"
