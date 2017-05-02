@@ -41,7 +41,8 @@ use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 
-use proto::{Bincoded, Digest};
+use common::Welcome;
+use proto::{Bincoded, Digest, DriverInfo};
 
 
 /// hopefully replace with `?` later
@@ -152,8 +153,8 @@ impl HashedHeapFile {
     fn write_to<W: AsyncWrite>(self, w: W) -> impl Future<Item=W, Error=io::Error> {
         let HashedHeapFile(buf, digest) = self;
         assert!(buf.len() < receive::INLINE_MAX);
-        let len = buf.len() as u32;
-        let resp = common::Welcome::InlineDriver(len, digest);
+        let info = DriverInfo {len: buf.len(), digest: digest};
+        let resp = Welcome::InlineDriver(info);
         let coded = Bincoded::new(&resp);
 
         futures::future::lazy(|| coded)
@@ -165,23 +166,22 @@ impl HashedHeapFile {
 
 /// Downloads the newest driver (if needed), returning its path.
 fn fetch_driver<R: AsyncRead + 'static>(reader: R)
-    -> Box<Future<Item=(R, Digest, PathBuf), Error=io::Error>>
+    -> Box<Future<Item=(R, Box<DriverInfo>, PathBuf), Error=io::Error>>
 {
     box common::read_bincoded(reader)
       .and_then(|(reader, welcome)| {
 
         match welcome {
-            common::Welcome::Current => unimplemented!(),
-            common::Welcome::InlineDriver(len, digest) => {
-                println!("receiving driver {} ({}kb)", digest.short_hex(), len/1000);
+            Welcome::Current => unimplemented!(),
+            Welcome::InlineDriver(info) => {
+                println!("receiving driver {} ({}kb)", info.digest.short_hex(), info.len/1000);
 
-                let download = receive::verify_and_save(len as usize, digest, reader)
-                    .and_then(Ok);
+                let download = receive::verify_and_save(box info, reader).and_then(Ok);
 
                 Either::A(download)
             }
-            common::Welcome::DownloadDriver(url, digest) => {
-                println!("TODO download {} and check {}", url, digest);
+            Welcome::DownloadDriver(url, info) => {
+                println!("TODO download {} and check {}", url, info.digest);
                 let download = io::Error::new(ErrorKind::Other, "todo download");
                 Either::B(Err(download).into_future())
             }
@@ -216,8 +216,8 @@ fn main() {
 
             let welcome = fetch_driver(reader);
 
-            welcome.join(greeting).and_then(move |((r, digest, path), w)| {
-                println!("driver {}", digest.short_hex());
+            welcome.join(greeting).and_then(move |((r, info, path), w)| {
+                println!("driver {}", info.digest.short_hex());
 
                 let (driver_tx, driver_rx) = mpsc::channel();
                 let (tx, rx) = futures::sync::mpsc::unbounded();

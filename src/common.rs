@@ -8,13 +8,13 @@ use futures::future::{self, Future};
 use serde::{Deserialize, Serialize};
 use tokio_io::{self, AsyncRead, AsyncWrite};
 
-use proto::{Bincoded, Digest};
+use proto::{Bincoded, Digest, DriverInfo};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Welcome {
     Current,
-    InlineDriver(u32, Digest),
-    DownloadDriver(String, Digest),
+    InlineDriver(DriverInfo),
+    DownloadDriver(String, DriverInfo),
 }
 
 #[derive(Debug, Deserialize, Serialize)]

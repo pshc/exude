@@ -7,7 +7,7 @@ use futures::Future;
 use futures::future;
 use tokio_io::{self, AsyncRead};
 
-use proto::Digest;
+use proto::DriverInfo;
 
 /// Maximum byte length of an InlineDriver payload.
 pub static INLINE_MAX: usize = 100_000_000;
@@ -15,16 +15,17 @@ pub static INLINE_MAX: usize = 100_000_000;
 /// Intended for inline downloads only; use a smart HTTP client for larger downloads.
 ///
 /// Temporary: return type is boxed instead of `impl Future` due to rust ICE #37096
-pub fn verify_and_save<R: AsyncRead + 'static>(len: usize, digest: Digest, reader: R)
-    -> Box<Future<Item=(R, Digest, PathBuf), Error=io::Error>>
+pub fn verify_and_save<R: AsyncRead + 'static>(info: Box<DriverInfo>, reader: R)
+    -> Box<Future<Item=(R, Box<DriverInfo>, PathBuf), Error=io::Error>>
 {
+    let len = info.len;
     if len > INLINE_MAX {
         let err = io::Error::new(ErrorKind::InvalidInput, "inline download too large");
         return box future::failed(err)
     }
 
     let mut path = repo_path().to_owned();
-    let hex = digest.hex_bytes();
+    let hex = info.digest.hex_bytes();
     path.push(unsafe { str::from_utf8_unchecked(&hex) });
 
     // xxx--don't buffer! stream into another thread
@@ -34,7 +35,7 @@ pub fn verify_and_save<R: AsyncRead + 'static>(len: usize, digest: Digest, reade
     }
     box tokio_io::io::read_exact(reader, buf).and_then(|(reader, buf)| {
         let checked_digest = utils::digest_from_bytes(&buf[..]);
-        if digest != checked_digest {
+        if info.digest != checked_digest {
             let err = io::Error::new(ErrorKind::InvalidData, "hash check failed");
             return Err(err)
         }
@@ -44,7 +45,7 @@ pub fn verify_and_save<R: AsyncRead + 'static>(len: usize, digest: Digest, reade
         file.write_all(&buf)?;
         file.sync_data()?;
 
-        Ok((reader, digest, path))
+        Ok((reader, info, path))
     })
 }
 
