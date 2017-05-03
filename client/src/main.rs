@@ -8,6 +8,8 @@ extern crate g;
 extern crate libc;
 extern crate libloading;
 extern crate proto;
+#[macro_use]
+extern crate rental;
 extern crate serde;
 extern crate sha3;
 extern crate sodiumoxide;

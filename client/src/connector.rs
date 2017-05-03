@@ -8,7 +8,7 @@ use libc::c_void;
 use libloading::{self, Library, Symbol};
 
 use env::{DriverCtx, DriverEnv};
-use g::{self, GlCtx};
+use g;
 
 pub struct Api<'lib> {
     s_driver: Symbol<'lib, extern fn(*mut DriverEnv)>,
@@ -17,11 +17,6 @@ pub struct Api<'lib> {
 
 impl<'lib> Api<'lib> {
     pub unsafe fn new(lib: &'lib Library) -> libloading::Result<Self> {
-        // hack... make sure those symbols will load later
-        let _ = lib.get::<g::GlDrawFn>(b"gl_draw\0")?;
-        let _ = lib.get::<g::GlSetupFn>(b"gl_setup\0")?;
-        let _ = lib.get::<g::GlCleanupFn>(b"gl_cleanup\0")?;
-
         Ok(Api {
             s_driver: lib.get(b"driver\0")?,
             s_version: lib.get(b"version\0")?,
@@ -37,30 +32,40 @@ impl<'lib> Api<'lib> {
     }
 }
 
-// TODO use `rental` to store library in here with the symbols!
-// also figure out a better name
-pub struct Driver(Library);
+rental! {
+    mod rent_libloading {
+        use g;
+        use libloading::{Library, Symbol};
+
+        #[rental]
+        pub struct RentDriver {
+            lib: Box<Library>,
+            syms: (Symbol<'lib, g::GlDrawFn>,
+                   Symbol<'lib, g::GlSetupFn>,
+                   Symbol<'lib, g::GlCleanupFn>),
+        }
+    }
+}
+
+pub struct Driver(rent_libloading::RentDriver);
 
 impl g::GlInterface for Driver {
-    fn draw(&self, ctx: &GlCtx, encoder: &mut g::Encoder) {
-        let gl_draw: Symbol<g::GlDrawFn> = unsafe { self.0.get(b"gl_draw\0").unwrap() };
-        gl_draw(ctx, encoder)
+    fn draw(&self, ctx: &g::GlCtx, encoder: &mut g::Encoder) {
+        self.0.rent(|syms| (syms.0)(ctx, encoder))
     }
 
     fn setup(&self, f: &mut g::Factory, rtv: g::RenderTargetView) -> io::Result<Box<g::GlCtx>> {
-        let gl_setup: Symbol<g::GlSetupFn> = unsafe { self.0.get(b"gl_setup\0").unwrap() };
-        gl_setup(f, rtv)
+        self.0.rent(|syms| (syms.1)(f, rtv))
     }
 
-    fn cleanup(&self, ctx: Box<GlCtx>) {
-        let gl_cleanup: Symbol<g::GlCleanupFn> = unsafe { self.0.get(b"gl_cleanup\0").unwrap() };
-        gl_cleanup(ctx)
+    fn cleanup(&self, ctx: Box<g::GlCtx>) {
+        self.0.rent(|syms| (syms.2)(ctx))
     }
 
     // ought to have a join method that joins up with the driver thread...
 }
 
-pub fn load(path: &Path, comms: Box<DriverComms>) -> libloading::Result<Driver> {
+pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
 
     let lib = Library::new(path)?;
     {
@@ -74,9 +79,17 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> libloading::Result<Driver> 
         let env = DriverComms::into_env(comms);
         api.driver(box env);
     }
-    return Ok(Driver(lib))
 
-    // crashes here if any driver code is still being run (because Library is dropped)
+    rent_libloading::RentDriver::try_new(
+        box lib,
+        |lib| unsafe {
+            let draw = lib.get(b"gl_draw\0")?;
+            let setup = lib.get(b"gl_setup\0")?;
+            let cleanup = lib.get(b"gl_cleanup\0")?;
+            Ok((draw, setup, cleanup))
+        })
+        .map(Driver)
+        .map_err(|err| err.0)
 }
 
 /// Generates function pointers and context for DriverEnv.
