@@ -20,8 +20,8 @@ mod basic;
 #[path="../../server/src/common.rs"]
 mod common;
 mod connector;
-#[path="../../driver/src/env.rs"]
-mod env;
+#[path="../../driver/src/driver_abi.rs"]
+mod driver_abi;
 mod receive;
 
 use std::io::{self, ErrorKind, Write};

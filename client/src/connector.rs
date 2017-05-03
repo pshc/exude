@@ -7,7 +7,7 @@ use futures;
 use libc::c_void;
 use libloading::{Library, Symbol};
 
-use env::{DriverCtx, DriverEnv};
+use driver_abi::{DriverCallbacks, DriverCtx};
 use g;
 
 rental! {
@@ -48,15 +48,15 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
     let lib = Library::new(path)?;
     {
         let version: Symbol<extern "C" fn() -> u32> = unsafe { lib.get(b"version\0") }?;
-        let driver: Symbol<extern "C" fn(*mut DriverEnv)> = unsafe {  lib.get(b"driver\0") }?;
+        let driver: Symbol<extern "C" fn(*mut DriverCallbacks)> = unsafe { lib.get(b"driver\0") }?;
 
         print!("loaded driver ");
         io::stdout().flush().ok().expect("flush1");
         println!("v{}", version());
         io::stdout().flush().ok().expect("flush2");
 
-        let env = box DriverComms::into_env(comms);
-        driver(Box::into_raw(env));
+        let cbs = box DriverComms::into_callbacks(comms);
+        driver(Box::into_raw(cbs));
     }
 
     rent_libloading::RentDriver::try_new(
@@ -71,15 +71,15 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
         .map_err(|err| err.0)
 }
 
-/// Generates function pointers and context for DriverEnv.
+/// Generates function pointers and context for DriverCallbacks.
 pub struct DriverComms {
     pub rx: mpsc::Receiver<Box<[u8]>>,
     pub tx: futures::sync::mpsc::UnboundedSender<Box<[u8]>>,
 }
 
 impl DriverComms {
-    pub fn into_env(comms: Box<DriverComms>) -> DriverEnv {
-        DriverEnv {
+    pub fn into_callbacks(comms: Box<DriverComms>) -> DriverCallbacks {
+        DriverCallbacks {
             ctx: DriverCtx(Box::into_raw(comms) as *mut c_void),
             send_fn: driver_send,
             try_recv_fn: driver_try_recv,

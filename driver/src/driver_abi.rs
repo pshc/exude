@@ -8,7 +8,7 @@ unsafe impl Send for DriverCtx {}
 /// For transmitting messages between driver and client core.
 /// Uses C ABI in an attempt at interface stability.
 #[repr(C)]
-pub struct DriverEnv {
+pub struct DriverCallbacks {
     /// Must be passed into all below functions.
     pub ctx: DriverCtx,
 

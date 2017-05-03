@@ -1,16 +1,18 @@
+//! Safe high-level wrapper for DriverCallbacks.
+
 use std::io::{self, ErrorKind};
 use std::ptr;
 
 use serde::{Deserialize, Serialize};
 
-use env::DriverEnv;
+use driver_abi::DriverCallbacks;
 use proto::bincoded::{self, Bincoded};
 
-pub struct EnvWrapper(Box<DriverEnv>);
+pub struct Pipe(Box<DriverCallbacks>);
 
-impl EnvWrapper {
-    pub fn wrap(env: *mut DriverEnv) -> Self {
-        EnvWrapper(unsafe { Box::from_raw(env) })
+impl Pipe {
+    pub fn wrap(cbs: *mut DriverCallbacks) -> Self {
+        Pipe(unsafe { Box::from_raw(cbs) })
     }
 
     pub fn send<T: Serialize>(&self, msg: &T) -> io::Result<()> {
@@ -43,7 +45,7 @@ impl EnvWrapper {
     }
 }
 
-impl Drop for EnvWrapper {
+impl Drop for Pipe {
     fn drop(&mut self) {
         (self.0.shutdown_fn)(self.0.ctx.0)
     }

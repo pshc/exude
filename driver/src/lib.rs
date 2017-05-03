@@ -6,7 +6,7 @@ extern crate libc;
 extern crate proto;
 extern crate serde;
 
-mod env;
+mod driver_abi;
 mod wrapper;
 
 use std::io::{self, ErrorKind, Write};
@@ -22,15 +22,15 @@ pub extern fn version() -> u32 {
 }
 
 #[no_mangle]
-pub extern fn driver(env: *mut env::DriverEnv) {
-    let env = wrapper::EnvWrapper::wrap(env);
+pub extern fn driver(cbs: *mut driver_abi::DriverCallbacks) {
+    let pipe = wrapper::Pipe::wrap(cbs);
 
     let _input = thread::spawn(move || {
         let stdin = io::stdin();
         let mut stdout = io::stdout();
         let mut line = String::new();
         loop {
-            match env.try_recv::<api::DownResponse>() {
+            match pipe.try_recv::<api::DownResponse>() {
                 Ok(None) => (),
                 Ok(Some(resp)) => {
                     println!("=== {:?} ===", resp);
@@ -59,11 +59,11 @@ pub extern fn driver(env: *mut env::DriverEnv) {
 
             if let Ok(n) = line.parse::<u32>() {
                 println!("n: {}", n);
-                env.send(&api::UpRequest::Ping(n)).unwrap();
+                pipe.send(&api::UpRequest::Ping(n)).unwrap();
             }
         }
 
-        drop(env);
+        drop(pipe);
     });
 }
 
