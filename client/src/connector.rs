@@ -5,32 +5,10 @@ use std::sync::mpsc;
 
 use futures;
 use libc::c_void;
-use libloading::{self, Library, Symbol};
+use libloading::{Library, Symbol};
 
 use env::{DriverCtx, DriverEnv};
 use g;
-
-pub struct Api<'lib> {
-    s_driver: Symbol<'lib, extern fn(*mut DriverEnv)>,
-    s_version: Symbol<'lib, extern fn() -> u32>,
-}
-
-impl<'lib> Api<'lib> {
-    pub unsafe fn new(lib: &'lib Library) -> libloading::Result<Self> {
-        Ok(Api {
-            s_driver: lib.get(b"driver\0")?,
-            s_version: lib.get(b"version\0")?,
-        })
-    }
-
-    pub fn driver(&self, env: Box<DriverEnv>) {
-        (*self.s_driver)(Box::into_raw(env))
-    }
-
-    pub fn version(&self) -> u32 {
-        (*self.s_version)()
-    }
-}
 
 rental! {
     mod rent_libloading {
@@ -69,15 +47,16 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
 
     let lib = Library::new(path)?;
     {
-        let api = unsafe { Api::new(&lib)? };
+        let version: Symbol<extern "C" fn() -> u32> = unsafe { lib.get(b"version\0") }?;
+        let driver: Symbol<extern "C" fn(*mut DriverEnv)> = unsafe {  lib.get(b"driver\0") }?;
 
         print!("loaded driver ");
         io::stdout().flush().ok().expect("flush1");
-        println!("v{}", api.version());
+        println!("v{}", version());
         io::stdout().flush().ok().expect("flush2");
 
-        let env = DriverComms::into_env(comms);
-        api.driver(box env);
+        let env = box DriverComms::into_env(comms);
+        driver(Box::into_raw(env));
     }
 
     rent_libloading::RentDriver::try_new(
