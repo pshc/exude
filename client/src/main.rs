@@ -32,13 +32,14 @@ use futures::{Future, Stream};
 use gfx::Device;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
-use tokio_io::AsyncRead;
+use tokio_io::{AsyncRead, AsyncWrite};
 
 use g::gfx;
 use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 
+use common::IoFuture;
 use proto::handshake;
 
 fn main() {
@@ -68,26 +69,12 @@ fn main() {
                 let (driver_tx, driver_rx) = mpsc::channel();
                 let (tx, rx) = futures::sync::mpsc::unbounded();
                 let comms = connector::DriverComms {rx: driver_rx, tx: tx};
+                let net_comms = NetComms {tx: driver_tx, rx: rx};
 
                 // inform the draw thread about our new driver
                 update_tx.send((path, box comms)).unwrap();
 
-                // now be a dumb pipe, but with length-delimited messages for some reason??
-                // todo: read more than one message
-                let read = common::read_with_length(r).and_then(move |(_r, vec)| {
-                    driver_tx.send(vec.into_boxed_slice()).map_err(|_| {
-                        io::Error::new(ErrorKind::BrokenPipe, "core: done reading")
-                    })
-                });
-
-                let write = rx
-                .map_err(|()| io::Error::new(ErrorKind::BrokenPipe, "core: done writing"))
-                .fold(w, |w, msg| {
-                    common::write_with_length(w, msg).map(|(w, _)| w)
-                })
-                .map(|_| println!("write: donezo"));
-
-                read.join(write)
+                box net_comms.handle(r, w).map(|_| println!("net: donezo"))
             })
         });
 
@@ -169,5 +156,35 @@ fn main() {
 
     if let Some((driver, ctx)) = driver {
         driver.gl_cleanup()(ctx);
+    }
+}
+
+struct NetComms {
+    tx: mpsc::Sender<Box<[u8]>>,
+    rx: futures::sync::mpsc::UnboundedReceiver<Box<[u8]>>,
+}
+
+impl NetComms {
+    fn handle<R, W>(self, r: R, w: W) -> IoFuture<(R, W)>
+    where
+        R: AsyncRead + 'static,
+        W: AsyncWrite + 'static,
+    {
+        let NetComms {tx, rx} = self;
+
+        // todo: read more than one message
+        let read = common::read_with_length(r).and_then(move |(r, vec)| {
+            tx.send(vec.into_boxed_slice())
+                .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "core: done reading"))
+                .map(|_| r)
+        });
+
+        let write = rx
+        .map_err(|()| io::Error::new(ErrorKind::BrokenPipe, "core: done writing"))
+        .fold(w, |w, msg| {
+            common::write_with_length(w, msg).map(|(w, _)| w)
+        });
+
+        box read.join(write)
     }
 }
