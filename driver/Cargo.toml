@@ -1,13 +1,15 @@
 [package]
+authors = ["Paul Collier <paul@paulcollier.ca>"]
 name = "driver"
 version = "0.1.0"
-authors = ["Paul Collier <paul@paulcollier.ca>"]
-
-[lib]
-name = "driver"
-crate-type = ["dylib"]
 
 [dependencies]
 libc = "0.2"
-proto = { path = "../proto" }
 serde = "0.9"
+
+[dependencies.proto]
+path = "../proto"
+
+[lib]
+crate-type = ["dylib"]
+name = "driver"

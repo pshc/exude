@@ -10,9 +10,11 @@ futures = "0.1"
 futures-cpupool = "0.1"
 libc = "0.2"
 libloading = "0.3.2"
-proto = { path = "../proto" }
 serde = "0.9"
 sha3 = "0.5"
 sodiumoxide = "0.0.14"
 tokio-core = "0.1"
 tokio-io = "0.1"
+
+[dependencies.proto]
+path = "../proto"

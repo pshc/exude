@@ -1,18 +1,30 @@
-[workspace]
-
 [package]
 authors = ["Paul Collier <paul@paulcollier.ca>"]
 name = "exude"
 publish = false
 version = "0.1.0"
 
-[profile.dev]
-opt-level = 1 # faster hashing
+[dependencies.client]
+path = "client"
 
-[dependencies]
-client = { path = "client" }
-driver = { path = "driver" }
-g = { path = "g" }
-issuer = { path = "issuer" }
-proto = { path = "proto" }
-server = { path = "server" }
+[dependencies.driver]
+path = "driver"
+
+[dependencies.g]
+path = "g"
+
+[dependencies.issuer]
+path = "issuer"
+
+[dependencies.proto]
+path = "proto"
+
+[dependencies.server]
+path = "server"
+
+[profile]
+
+[profile.dev]
+opt-level = 1
+
+[workspace]
