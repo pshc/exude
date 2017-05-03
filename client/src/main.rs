@@ -38,6 +38,7 @@ use g::gfx;
 use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
+use g::GlInterface;
 
 use common::IoFuture;
 use proto::handshake;
@@ -110,7 +111,7 @@ fn main() {
             println!("driver setup!");
             io::stdout().flush().unwrap();
 
-            let ctx = (loaded.gl_setup())(&mut factory, main_color.clone()).unwrap();
+            let ctx = loaded.setup(&mut factory, main_color.clone()).unwrap();
             driver = Some((loaded, ctx));
         }
 
@@ -134,7 +135,7 @@ fn main() {
 
         encoder.clear(&main_color, BLACK);
         if let Some((ref driver, ref ctx)) = driver {
-            driver.gl_draw()(&**ctx, &mut encoder);
+            driver.draw(&**ctx, &mut encoder);
             text.add("Active", [10, 10], WHITE);
         } else {
             if let Some((ref mut vis, ref mut progress)) = basic_vis {
@@ -155,7 +156,7 @@ fn main() {
     }
 
     if let Some((driver, ctx)) = driver {
-        driver.gl_cleanup()(ctx);
+        driver.cleanup(ctx);
     }
 }
 

@@ -10,17 +10,24 @@ pub mod macros;
 
 pub type Res = gfx_device_gl::Resources;
 pub type Command = gfx_device_gl::CommandBuffer;
+pub type Factory = gfx_device_gl::Factory;
 pub type ColorFormat = gfx::format::Rgba8;
 
 pub type Encoder = gfx::Encoder<Res, Command>;
 pub type RenderTargetView = gfx::handle::RenderTargetView<Res, ColorFormat>;
 
-pub type GlDrawFn = extern fn(data: &DrawGL, encoder: &mut Encoder);
-pub type GlSetupFn = extern fn(&mut gfx_device_gl::Factory,
-                               RenderTargetView)
-                               -> io::Result<Box<DrawGL>>;
-pub type GlCleanupFn = extern fn(data: Box<DrawGL>);
+pub trait GlInterface {
+    fn draw(&self, &GlCtx, &mut Encoder);
+    fn setup(&self, &mut Factory, RenderTargetView) -> io::Result<Box<GlCtx>>;
+    fn cleanup(&self, Box<GlCtx>);
+}
 
-pub trait DrawGL {
+pub type GlDrawFn = extern fn(&GlCtx, &mut Encoder);
+pub type GlSetupFn = extern fn(&mut Factory,
+                               RenderTargetView)
+                               -> io::Result<Box<GlCtx>>;
+pub type GlCleanupFn = extern fn(Box<GlCtx>);
+
+pub trait GlCtx {
     fn draw(&self, &mut Encoder);
 }

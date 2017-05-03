@@ -12,9 +12,8 @@ mod wrapper;
 use std::io::{self, ErrorKind, Write};
 use std::thread;
 
-use g::{DrawGL, Encoder, Res, gfx};
+use g::{GlCtx, Encoder, Res, gfx};
 use g::gfx::traits::FactoryExt;
-use g::gfx_device_gl;
 use proto::api;
 
 #[no_mangle]
@@ -87,10 +86,9 @@ const TRIANGLE: [Vertex; 3] = [
 ];
 
 #[no_mangle]
-pub extern fn gl_setup(
-    factory: &mut gfx_device_gl::Factory,
-    render_target: g::RenderTargetView)
-    -> io::Result<Box<g::DrawGL>>
+pub extern fn gl_setup(factory: &mut g::Factory,
+                       render_target: g::RenderTargetView)
+                       -> io::Result<Box<g::GlCtx>>
 {
     let pso = factory.create_pipeline_simple(
         include_bytes!("shader/triangle_150.glslv"),
@@ -118,20 +116,20 @@ struct RenderImpl<R: gfx::Resources, M> {
 }
 
 #[no_mangle]
-pub extern fn gl_draw(data: &DrawGL, encoder: &mut Encoder) {
-    data.draw(encoder);
+pub extern fn gl_draw(ctx: &GlCtx, encoder: &mut Encoder) {
+    ctx.draw(encoder);
     std::thread::sleep(std::time::Duration::from_millis(10));
 }
 
-impl DrawGL for RenderImpl<Res, pipe::Meta> {
+impl GlCtx for RenderImpl<Res, pipe::Meta> {
     fn draw(&self, mut encoder: &mut Encoder) {
         encoder.draw(&self.slice, &self.pso, &self.data)
     }
 }
 
 #[no_mangle]
-pub extern fn gl_cleanup(data: Box<DrawGL>) {
-    drop(data);
+pub extern fn gl_cleanup(ctx: Box<GlCtx>) {
+    drop(ctx);
     println!("cleaned up GL");
 }
 

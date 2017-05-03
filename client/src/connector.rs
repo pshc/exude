@@ -8,7 +8,7 @@ use libc::c_void;
 use libloading::{self, Library, Symbol};
 
 use env::{DriverCtx, DriverEnv};
-use g;
+use g::{self, GlCtx};
 
 pub struct Api<'lib> {
     s_driver: Symbol<'lib, extern fn(*mut DriverEnv)>,
@@ -41,17 +41,20 @@ impl<'lib> Api<'lib> {
 // also figure out a better name
 pub struct Driver(Library);
 
-impl Driver {
-    pub fn gl_draw<'lib>(&'lib self) -> Symbol<'lib, g::GlDrawFn> {
-        unsafe { self.0.get(b"gl_draw\0").unwrap() }
+impl g::GlInterface for Driver {
+    fn draw(&self, ctx: &GlCtx, encoder: &mut g::Encoder) {
+        let gl_draw: Symbol<g::GlDrawFn> = unsafe { self.0.get(b"gl_draw\0").unwrap() };
+        gl_draw(ctx, encoder)
     }
 
-    pub fn gl_setup<'lib>(&'lib self) -> Symbol<'lib, g::GlSetupFn> {
-        unsafe { self.0.get(b"gl_setup\0").unwrap() }
+    fn setup(&self, f: &mut g::Factory, rtv: g::RenderTargetView) -> io::Result<Box<g::GlCtx>> {
+        let gl_setup: Symbol<g::GlSetupFn> = unsafe { self.0.get(b"gl_setup\0").unwrap() };
+        gl_setup(f, rtv)
     }
 
-    pub fn gl_cleanup<'lib>(&'lib self) -> Symbol<'lib, g::GlCleanupFn> {
-        unsafe { self.0.get(b"gl_cleanup\0").unwrap() }
+    fn cleanup(&self, ctx: Box<GlCtx>) {
+        let gl_cleanup: Symbol<g::GlCleanupFn> = unsafe { self.0.get(b"gl_cleanup\0").unwrap() };
+        gl_cleanup(ctx)
     }
 
     // ought to have a join method that joins up with the driver thread...

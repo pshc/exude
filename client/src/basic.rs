@@ -1,9 +1,8 @@
 use std::io::{self, ErrorKind};
 
-use g::{ColorFormat, Encoder, RenderTargetView, Res};
+use g::{self, ColorFormat, Encoder, RenderTargetView, Res};
 use g::gfx::{self, IntoIndexBuffer};
 use g::gfx::traits::{Factory, FactoryExt};
-use g::gfx_device_gl;
 
 gfx_defines! {
     vertex Vertex {
@@ -29,7 +28,7 @@ pub struct Renderer<R: gfx::Resources, M> {
 
 impl Renderer<Res, basic::Meta> {
     pub fn new(
-        factory: &mut gfx_device_gl::Factory,
+        factory: &mut g::Factory,
         render_target: RenderTargetView)
         -> io::Result<Self>
     {
@@ -65,7 +64,7 @@ impl Renderer<Res, basic::Meta> {
         })
     }
 
-    pub fn update(&mut self, factory: &mut gfx_device_gl::Factory, progress: f32)
+    pub fn update(&mut self, factory: &mut g::Factory, progress: f32)
         -> Result<(), gfx::mapping::Error>
     {
         let mut vbuf = factory.write_mapping(&self.data.vbuf)?;
