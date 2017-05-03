@@ -10,22 +10,29 @@ mod driver_abi;
 mod wrapper;
 
 use std::io::{self, ErrorKind, Write};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
+use libc::c_void;
+
+use driver_abi::{DriverCallbacks, IoHandle};
 use g::{GlCtx, Encoder, Res, gfx};
 use g::gfx::traits::FactoryExt;
 use proto::api;
 
 #[no_mangle]
-pub extern fn version() -> u32 {
+pub extern "C" fn version() -> u32 {
     0
 }
 
+struct CallbacksPtr(*mut DriverCallbacks);
+unsafe impl Send for CallbacksPtr {}
+
 #[no_mangle]
-pub extern fn driver(cbs: *mut driver_abi::DriverCallbacks) {
+pub extern "C" fn io_spawn(cbs: *mut DriverCallbacks) -> IoHandle {
     let pipe = wrapper::Pipe::wrap(cbs);
 
-    let _input = thread::spawn(move || {
+    let builder = thread::Builder::new().name("driver_io".into());
+    let joiner: io::Result<JoinHandle<CallbacksPtr>> = builder.spawn(move || {
         let stdin = io::stdin();
         let mut stdout = io::stdout();
         let mut line = String::new();
@@ -63,8 +70,24 @@ pub extern fn driver(cbs: *mut driver_abi::DriverCallbacks) {
             }
         }
 
-        drop(pipe);
+        CallbacksPtr(pipe.consume())
     });
+
+    IoHandle(match joiner {
+        Ok(joiner) => Box::into_raw(box joiner) as *mut c_void,
+        Err(e) => {
+            let _ = writeln!(io::stderr(), "IO thread creation: {}", e);
+            std::ptr::null_mut()
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn io_join(handle: IoHandle) -> *mut DriverCallbacks {
+    assert!(!handle.0.is_null());
+    let joiner = unsafe { Box::from_raw(handle.0 as *mut JoinHandle<CallbacksPtr>) };
+    let ptr = joiner.join().unwrap(); // TODO decide how to handle child panics
+    ptr.0
 }
 
 gfx_defines! {
@@ -135,6 +158,9 @@ pub extern fn gl_cleanup(ctx: Box<GlCtx>) {
 
 #[allow(dead_code)]
 fn check_gl_types() {
+    let _: driver_abi::VersionFn = version;
+    let _: driver_abi::IoSpawnFn = io_spawn;
+    let _: driver_abi::IoJoinFn = io_join;
     let _: g::GlSetupFn = gl_setup;
     let _: g::GlDrawFn = gl_draw;
     let _: g::GlCleanupFn = gl_cleanup;

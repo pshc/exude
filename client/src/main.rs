@@ -159,6 +159,9 @@ fn main() {
 
     if let Some((driver, ctx)) = driver {
         driver.cleanup(ctx);
+        println!("Waiting on driver's IO thread...");
+        driver.io_join();
+        println!("OK! Unloading driver.");
     }
 }
 
