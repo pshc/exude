@@ -1,15 +1,12 @@
 #![feature(box_syntax)]
 
 extern crate futures;
+extern crate proto;
 extern crate serde;
-#[macro_use]
-extern crate serde_derive;
 extern crate tokio_core;
 extern crate tokio_io;
 
 mod common;
-#[path="../../proto/mod.rs"]
-mod proto;
 
 use std::fs::File;
 use std::io::{self, ErrorKind, Read};
@@ -21,9 +18,8 @@ use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use common::{IoFuture, Welcome};
-use proto::{Bincoded, DriverInfo};
-use proto::api;
+use common::IoFuture;
+use proto::{Bincoded, DriverInfo, api, handshake};
 
 fn main() {
     let addr: SocketAddr = ([127, 0, 0, 1], 2001).into();
@@ -76,14 +72,14 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=
         println!("{} is here: {:?}", addr, hello);
 
         match hello {
-            common::Hello(None) => {
+            handshake::Hello(None) => {
                 // send them the up-to-date driver
                 let driver = try_box!(HashedHeapFile::read_latest());
                 box driver.write_to(w).and_then(move |w| {
                     Ok((r, w))
                 })
             }
-            common::Hello(Some(_digest)) => {
+            handshake::Hello(Some(_digest)) => {
                 // check if digest is up-to-date; if not, send delta
                 unimplemented!()
             }
@@ -134,7 +130,7 @@ impl HashedHeapFile {
         let info: DriverInfo = unsafe { Bincoded::from_vec(meta_vec) }.deserialize()?;
         let len = info.len;
 
-        assert!(info.len <= common::INLINE_MAX);
+        assert!(info.len <= handshake::INLINE_MAX);
         let mut driver_buf = Vec::with_capacity(len);
         unsafe {
             driver_buf.set_len(len);
@@ -155,8 +151,8 @@ impl HashedHeapFile {
     /// Write an InlineDriver header and then the bytes.
     fn write_to<W: AsyncWrite + 'static>(self, w: W) -> IoFuture<W> {
         let HashedHeapFile(buf, info) = self;
-        assert!(buf.len() < common::INLINE_MAX);
-        let resp = Welcome::InlineDriver(info);
+        assert!(buf.len() < handshake::INLINE_MAX);
+        let resp = handshake::Welcome::InlineDriver(info);
         let coded = Bincoded::new(&resp);
 
         box futures::future::lazy(|| coded)

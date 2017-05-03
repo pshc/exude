@@ -14,4 +14,5 @@ client = { path = "client" }
 driver = { path = "driver" }
 g = { path = "g" }
 issuer = { path = "issuer" }
+proto = { path = "proto" }
 server = { path = "server" }

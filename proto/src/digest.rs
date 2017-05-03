@@ -20,7 +20,6 @@ impl Digest {
         ascii
     }
 
-    #[allow(dead_code)]
     pub fn short_hex(&self) -> String {
         let ascii = self.hex_bytes();
         let hex = unsafe { str::from_utf8_unchecked(&ascii[..12]) };

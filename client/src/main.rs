@@ -7,9 +7,8 @@ extern crate futures_cpupool;
 extern crate g;
 extern crate libc;
 extern crate libloading;
+extern crate proto;
 extern crate serde;
-#[macro_use]
-extern crate serde_derive;
 extern crate sha3;
 extern crate sodiumoxide;
 extern crate tokio_core;
@@ -21,8 +20,6 @@ mod common;
 mod connector;
 #[path="../../driver/src/env.rs"]
 mod env;
-#[path="../../proto/mod.rs"]
-mod proto;
 mod receive;
 
 use std::io::{self, ErrorKind, Write};
@@ -43,9 +40,8 @@ use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 
-use common::{IoFuture, Welcome};
-use proto::DriverInfo;
-
+use common::IoFuture;
+use proto::handshake::{self, DriverInfo};
 
 /// Downloads the newest driver (if needed), returning its path.
 fn fetch_driver<R: AsyncRead + 'static>(reader: R) -> IoFuture<(R, Box<DriverInfo>, PathBuf)> {
@@ -53,15 +49,15 @@ fn fetch_driver<R: AsyncRead + 'static>(reader: R) -> IoFuture<(R, Box<DriverInf
       .and_then(|(reader, welcome)| {
 
         match welcome {
-            Welcome::Current => unimplemented!(),
-            Welcome::InlineDriver(info) => {
+            handshake::Welcome::Current => unimplemented!(),
+            handshake::Welcome::InlineDriver(info) => {
                 println!("receiving driver {} ({}kb)", info.digest.short_hex(), info.len/1000);
 
                 let download = receive::verify_and_save(box info, reader).and_then(Ok);
 
                 Either::A(download)
             }
-            Welcome::DownloadDriver(url, info) => {
+            handshake::Welcome::DownloadDriver(url, info) => {
                 println!("TODO download {} and check {} and SIG", url, info.digest);
                 let download = io::Error::new(ErrorKind::Other, "todo download");
                 Either::B(Err(download).into_future())
@@ -85,7 +81,7 @@ fn main() {
 
             let greeting = {
                 let cached_driver = None;
-                let hello = common::Hello(cached_driver);
+                let hello = handshake::Hello(cached_driver);
                 common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
             };
 

@@ -1,13 +1,8 @@
 extern crate digest;
+extern crate proto;
 extern crate rpassword;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
 extern crate sha3;
 extern crate sodiumoxide;
-
-#[path="../../proto/mod.rs"]
-mod proto;
 
 use std::env;
 use std::io::{self, ErrorKind, Read, Write};

@@ -1,8 +1,7 @@
-pub extern crate bincode;
-
 use std::io::{self, ErrorKind};
 use std::marker::PhantomData;
 
+use bincode;
 use serde::{Deserialize, Serialize};
 
 /// Holds the result of `bincode::serialize`.
@@ -12,7 +11,6 @@ pub struct Bincoded<T> {
     _phantom: PhantomData<T>,
 }
 
-#[allow(dead_code)]
 pub static BINCODED_MAX: u64 = 0xffff;
 
 fn to_io_err(err: bincode::Error) -> io::Error {
@@ -23,13 +21,11 @@ fn to_io_err(err: bincode::Error) -> io::Error {
 }
 
 impl<T> Bincoded<T> {
-    #[allow(dead_code)]
     /// Returns the number of serialized bytes stored. Does not include length header.
     pub fn len(&self) -> usize {
         self.vec.len()
     }
 
-    #[allow(dead_code)]
     /// Not intended for general use; this is for low-level use.
     /// Precondition: `vec` must have been encoded with the same T.
     pub unsafe fn from_vec(vec: Vec<u8>) -> Self {
@@ -39,7 +35,6 @@ impl<T> Bincoded<T> {
 
 impl<T: Serialize> Bincoded<T> {
     /// Serializes `value`, storing the serialized bytes in `self`.
-    #[allow(dead_code)]
     pub fn new(value: &T) -> io::Result<Self> {
         let size_limit = bincode::Bounded(BINCODED_MAX);
         Ok(Bincoded {
@@ -68,7 +63,6 @@ pub fn deserialize_exact<R: AsRef<[u8]>, T: Deserialize>(slice: R) -> io::Result
 
 impl<T: Deserialize> Bincoded<T> {
     /// Deserialize the contained bytes.
-    #[allow(dead_code)]
     pub fn deserialize(&self) -> io::Result<T> {
         deserialize_exact(self)
     }

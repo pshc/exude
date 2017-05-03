@@ -1,6 +1,4 @@
-//! Shared code between client and server.
-
-#![allow(dead_code)]
+//! Shared messaging code between client and server.
 
 use std::io::{self, ErrorKind};
 
@@ -8,21 +6,8 @@ use futures::future::{self, Future};
 use serde::{Deserialize, Serialize};
 use tokio_io::{self, AsyncRead, AsyncWrite};
 
-use proto::{Bincoded, Digest, DriverInfo};
+use proto::Bincoded;
 
-
-/// Maximum byte length of an InlineDriver payload.
-pub static INLINE_MAX: usize = 100_000_000;
-
-#[derive(Debug, Deserialize, Serialize)]
-pub enum Welcome {
-    Current,
-    InlineDriver(DriverInfo),
-    DownloadDriver(String, DriverInfo),
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Hello(pub Option<Digest>);
 
 /// No `Send` needed.
 pub type IoFuture<T> = Box<Future<Item=T, Error=io::Error>>;
