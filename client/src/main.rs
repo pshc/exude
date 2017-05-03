@@ -28,8 +28,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
-use futures::{IntoFuture, Future, Stream};
-use futures::future::Either;
+use futures::{Future, Stream};
 use gfx::Device;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
@@ -40,31 +39,7 @@ use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 
-use common::IoFuture;
-use proto::handshake::{self, DriverInfo};
-
-/// Downloads the newest driver (if needed), returning its path.
-fn fetch_driver<R: AsyncRead + 'static>(reader: R) -> IoFuture<(R, Box<DriverInfo>, PathBuf)> {
-    box common::read_bincoded(reader)
-      .and_then(|(reader, welcome)| {
-
-        match welcome {
-            handshake::Welcome::Current => unimplemented!(),
-            handshake::Welcome::InlineDriver(info) => {
-                println!("receiving driver {} ({}kb)", info.digest.short_hex(), info.len/1000);
-
-                let download = receive::verify_and_save(box info, reader).and_then(Ok);
-
-                Either::A(download)
-            }
-            handshake::Welcome::DownloadDriver(url, info) => {
-                println!("TODO download {} and check {} and SIG", url, info.digest);
-                let download = io::Error::new(ErrorKind::Other, "todo download");
-                Either::B(Err(download).into_future())
-            }
-        }
-    })
-}
+use proto::handshake;
 
 fn main() {
     let addr: SocketAddr = ([127, 0, 0, 1], 2001).into();
@@ -85,7 +60,7 @@ fn main() {
                 common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
             };
 
-            let welcome = fetch_driver(reader);
+            let welcome = receive::fetch_driver(reader);
 
             welcome.join(greeting).and_then(move |((r, info, path), w)| {
                 println!("driver {}", info.digest.short_hex());
