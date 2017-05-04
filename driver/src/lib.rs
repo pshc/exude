@@ -4,7 +4,6 @@
 extern crate g;
 extern crate libc;
 extern crate proto;
-extern crate serde;
 
 mod driver_abi;
 mod wrapper;

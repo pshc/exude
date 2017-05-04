@@ -6,7 +6,6 @@ version = "0.1.0"
 
 [dependencies]
 futures = "0.1"
-serde = "0.9"
 tokio-core = "0.1"
 tokio-io = "0.1"
 

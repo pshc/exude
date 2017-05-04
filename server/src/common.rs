@@ -3,10 +3,10 @@
 use std::io::{self, ErrorKind};
 
 use futures::future::{self, Future};
-use serde::{Deserialize, Serialize};
 use tokio_io::{self, AsyncRead, AsyncWrite};
 
 use proto::Bincoded;
+use proto::serde::{Deserialize, Serialize};
 
 
 /// No `Send` needed.

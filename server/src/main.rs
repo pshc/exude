@@ -2,7 +2,6 @@
 
 extern crate futures;
 extern crate proto;
-extern crate serde;
 extern crate tokio_core;
 extern crate tokio_io;
 

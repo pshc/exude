@@ -4,10 +4,9 @@ use std::io::{self, ErrorKind, Write};
 use std::mem;
 use std::ptr;
 
-use serde::{Deserialize, Serialize};
-
 use driver_abi::DriverCallbacks;
 use proto::bincoded::{self, Bincoded};
+use proto::serde::{Deserialize, Serialize};
 
 pub struct Pipe(*mut DriverCallbacks);
 unsafe impl Send for Pipe {}
