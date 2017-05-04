@@ -4,10 +4,10 @@ name = "g"
 version = "0.1.0"
 
 [dependencies]
-gfx = "0.14.0"
-gfx_device_gl = "0.13"
-gfx_text = "0.15.0"
-gfx_window_glutin = "0.14"
+gfx = "0.15.1"
+gfx_device_gl = "0.14.0"
+gfx_text = "0.16.0"
+gfx_window_glutin = "0.15"
 glutin = "0.7.4"
 
 [lib]
