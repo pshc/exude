@@ -12,17 +12,17 @@ pub const LEN: usize = 64;
 pub struct Signature(pub [u8; LEN]);
 
 struct Visitor;
-impl de::Visitor for Visitor {
+impl<'de> de::Visitor<'de> for Visitor {
     type Value = Signature;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "a sodium signature")
     }
 
-    fn visit_seq<V: de::SeqVisitor>(self, mut visitor: V) -> Result<Self::Value, V::Error> {
+    fn visit_seq<V: de::SeqAccess<'de>>(self, mut visitor: V) -> Result<Self::Value, V::Error> {
         let mut bytes = [0u8; LEN];
         for i in 0..LEN {
-            if let Some(byte) = visitor.visit()? {
+            if let Some(byte) = visitor.next_element()? {
                 bytes[i] = byte
             } else {
                 use serde::de::Error;
@@ -33,17 +33,17 @@ impl de::Visitor for Visitor {
     }
 }
 
-impl Deserialize for Signature {
-    fn deserialize<D: Deserializer>(d: D) -> Result<Self, D::Error> {
-        d.deserialize_seq_fixed_size(LEN, Visitor)
+impl<'de> Deserialize<'de> for Signature {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_tuple(LEN, Visitor)
     }
 }
 
 impl Serialize for Signature {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeSeq;
+        use serde::ser::SerializeTuple;
         debug_assert_eq!(self.0.len(), LEN);
-        let mut seq = s.serialize_seq_fixed_size(LEN)?;
+        let mut seq = s.serialize_tuple(LEN)?;
         for byte in self.0.iter() {
             seq.serialize_element(byte)?;
         }

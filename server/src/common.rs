@@ -29,7 +29,7 @@ pub fn read_with_length<R: AsyncRead + 'static>(reader: R) -> IoFuture<(R, Vec<u
 pub fn read_bincoded<R, T>(reader: R) -> IoFuture<(R, T)>
 where
     R: AsyncRead + 'static,
-    T: Deserialize + 'static,
+    for<'de> T: Deserialize<'de> + 'static,
 {
     box read_with_length(reader).and_then(|(reader, vec)| {
         let bincoded = unsafe { Bincoded::<T>::from_vec(vec) };

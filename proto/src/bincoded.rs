@@ -44,7 +44,11 @@ impl<T: Serialize> Bincoded<T> {
     }
 }
 
-pub fn deserialize_exact<R: AsRef<[u8]>, T: Deserialize>(slice: R) -> io::Result<T> {
+pub fn deserialize_exact<R, T>(slice: R) -> io::Result<T>
+where
+    R: AsRef<[u8]>,
+    for<'de> T: Deserialize<'de>,
+{
     let slice = slice.as_ref();
     let len = slice.len() as u64;
     let ref mut cursor = io::Cursor::new(slice);
@@ -61,7 +65,7 @@ pub fn deserialize_exact<R: AsRef<[u8]>, T: Deserialize>(slice: R) -> io::Result
 
 }
 
-impl<T: Deserialize> Bincoded<T> {
+impl<T> Bincoded<T> where for<'de> T: Deserialize<'de> {
     /// Deserialize the contained bytes.
     pub fn deserialize(&self) -> io::Result<T> {
         deserialize_exact(self)

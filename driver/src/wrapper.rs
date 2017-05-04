@@ -36,7 +36,10 @@ impl Pipe {
         }
     }
 
-    pub fn try_recv<T: Deserialize>(&self) -> io::Result<Option<T>> {
+    pub fn try_recv<T>(&self) -> io::Result<Option<T>>
+    where
+        for<'de> T: Deserialize<'de>
+    {
         let cbs = unsafe { &*self.0 };
         let mut buf_ptr = ptr::null_mut();
         let len = (cbs.try_recv_fn)(cbs.ctx, &mut buf_ptr);
