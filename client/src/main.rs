@@ -21,26 +21,26 @@ mod common;
 mod connector;
 #[path="../../driver/src/driver_abi.rs"]
 mod driver_abi;
+mod net;
 mod receive;
 mod render_loop;
 
-use std::io::{self, ErrorKind, Write};
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
-use futures::{Future, Stream};
+use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
-use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_io::AsyncRead;
 
 use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 use g::GlInterface;
 
-use common::IoFuture;
 use proto::handshake;
 
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
@@ -78,7 +78,7 @@ fn main() {
                                 let (driver_tx, driver_rx) = mpsc::channel();
                                 let (tx, rx) = futures::sync::mpsc::unbounded();
                                 let comms = connector::DriverComms { rx: driver_rx, tx: tx };
-                                let net_comms = NetComms { tx: driver_tx, rx: rx };
+                                let net_comms = net::Comms { tx: driver_tx, rx: rx };
 
                                 // inform the draw thread about our new driver
                                 update_tx.send((path, box comms)).unwrap();
@@ -225,37 +225,5 @@ impl Drop for Hot {
             println!("Waiting on driver's IO thread...");
             driver.io_join();
         }
-    }
-}
-
-struct NetComms {
-    tx: mpsc::Sender<Box<[u8]>>,
-    rx: futures::sync::mpsc::UnboundedReceiver<Box<[u8]>>,
-}
-
-impl NetComms {
-    fn handle<R, W>(self, r: R, w: W) -> IoFuture<(R, W)>
-    where
-        R: AsyncRead + 'static,
-        W: AsyncWrite + 'static,
-    {
-        let NetComms { tx, rx } = self;
-
-        // todo: read more than one message
-        let read = common::read_with_length(r).and_then(
-            move |(r, vec)| {
-                tx.send(vec.into_boxed_slice())
-                    .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "core: done reading"),)
-                    .map(|_| r)
-            },
-        );
-
-        let write = rx
-        .map_err(|()| io::Error::new(ErrorKind::BrokenPipe, "core: done writing"))
-        .fold(w, |w, msg| {
-            common::write_with_length(w, msg).map(|(w, _)| w)
-        });
-
-        box read.join(write)
     }
 }
