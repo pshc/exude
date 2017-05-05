@@ -5,8 +5,8 @@ extern crate g;
 extern crate libc;
 extern crate proto;
 
+pub mod comms;
 mod driver_abi;
-mod wrapper;
 
 use std::io::{self, ErrorKind, Write};
 use std::thread::{self, JoinHandle};
@@ -26,50 +26,53 @@ pub extern "C" fn version() -> u32 {
 struct CallbacksPtr(*mut DriverCallbacks);
 unsafe impl Send for CallbacksPtr {}
 
+pub fn io_thread<P: comms::Pipe>(pipe: &P) {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    let mut line = String::new();
+    loop {
+        match pipe.try_recv::<api::DownResponse>() {
+            Ok(None) => (),
+            Ok(Some(resp)) => {
+                println!("=== {:?} ===", resp);
+            }
+            Err(_) => println!("driver: cannot read"),
+        }
+
+        print!("> ");
+        let _res = stdout.flush();
+        debug_assert!(_res.is_ok());
+
+        line.clear();
+        let line = match stdin.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => &line,
+            Err(e) => {
+                println!("{}", e);
+                break;
+            }
+        };
+
+        let line = line.trim();
+        if line == "q" {
+            break;
+        }
+
+        if let Ok(n) = line.parse::<u32>() {
+            println!("n: {}", n);
+            pipe.send(&api::UpRequest::Ping(n)).unwrap();
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn io_spawn(cbs: *mut DriverCallbacks) -> IoHandle {
-    let pipe = wrapper::Pipe::wrap(cbs);
+    let pipe = comms::Wrapper::new(cbs);
 
     let builder = thread::Builder::new().name("driver_io".into());
     let joiner: io::Result<JoinHandle<CallbacksPtr>> = builder.spawn(
         move || {
-            let stdin = io::stdin();
-            let mut stdout = io::stdout();
-            let mut line = String::new();
-            loop {
-                match pipe.try_recv::<api::DownResponse>() {
-                    Ok(None) => (),
-                    Ok(Some(resp)) => {
-                        println!("=== {:?} ===", resp);
-                    }
-                    Err(_) => println!("driver: cannot read"),
-                }
-
-                print!("> ");
-                let _res = stdout.flush();
-                debug_assert!(_res.is_ok());
-
-                line.clear();
-                let line = match stdin.read_line(&mut line) {
-                    Ok(0) => break,
-                    Ok(_) => &line,
-                    Err(e) => {
-                        println!("{}", e);
-                        break;
-                    }
-                };
-
-                let line = line.trim();
-                if line == "q" {
-                    break;
-                }
-
-                if let Ok(n) = line.parse::<u32>() {
-                    println!("n: {}", n);
-                    pipe.send(&api::UpRequest::Ping(n)).unwrap();
-                }
-            }
-
+            io_thread(&pipe);
             CallbacksPtr(pipe.consume())
         },
     );

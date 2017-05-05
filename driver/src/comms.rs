@@ -1,5 +1,3 @@
-//! Safe high-level wrapper for DriverCallbacks.
-
 use std::io::{self, ErrorKind, Write};
 use std::mem;
 use std::ptr;
@@ -8,21 +6,31 @@ use driver_abi::DriverCallbacks;
 use proto::bincoded::{self, Bincoded};
 use proto::serde::{Deserialize, Serialize};
 
-pub struct Pipe(*mut DriverCallbacks);
-unsafe impl Send for Pipe {}
+pub trait Pipe {
+    fn send<T: Serialize>(&self, &T) -> io::Result<()>;
+    fn try_recv<T>(&self) -> io::Result<Option<T>>
+    where
+        for<'de> T: Deserialize<'de>;
+}
 
-impl Pipe {
-    pub fn wrap(cbs: *mut DriverCallbacks) -> Self {
+/// Safe high-level wrapper for DriverCallbacks.
+pub struct Wrapper(*mut DriverCallbacks);
+unsafe impl Send for Wrapper {}
+
+impl Wrapper {
+    pub fn new(cbs: *mut DriverCallbacks) -> Self {
         assert!(!cbs.is_null());
-        Pipe(cbs)
+        Wrapper(cbs)
     }
 
     /// Must be called or memory will leak.
     pub fn consume(mut self) -> *mut DriverCallbacks {
         mem::replace(&mut self.0, ptr::null_mut())
     }
+}
 
-    pub fn send<T: Serialize>(&self, msg: &T) -> io::Result<()> {
+impl Pipe for Wrapper {
+    fn send<T: Serialize>(&self, msg: &T) -> io::Result<()> {
         let cbs = unsafe { &*self.0 };
 
         // so many copies... ugh!
@@ -36,7 +44,7 @@ impl Pipe {
         }
     }
 
-    pub fn try_recv<T>(&self) -> io::Result<Option<T>>
+    fn try_recv<T>(&self) -> io::Result<Option<T>>
     where
         for<'de> T: Deserialize<'de>,
     {
@@ -57,11 +65,11 @@ impl Pipe {
     }
 }
 
-impl Drop for Pipe {
+impl Drop for Wrapper {
     fn drop(&mut self) {
         if !self.0.is_null() {
             let _ = writeln!(io::stderr(), "WARNING: leaking driver callbacks");
-            debug_assert!(false, "must call Pipe::consume()");
+            debug_assert!(false, "must call Wrapper::consume()");
         }
     }
 }
