@@ -6,8 +6,16 @@ version = "0.1.0"
 [dependencies]
 libc = "0.2"
 
+[dependencies.g]
+optional = true
+path = "../g"
+
 [dependencies.proto]
 path = "../proto"
+
+[features]
+default = []
+static = ["g"]
 
 [lib]
 crate-type = ["dylib"]

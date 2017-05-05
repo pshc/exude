@@ -1,0 +1,24 @@
+[package]
+authors = ["Paul Collier <paul@paulcollier.ca>"]
+name = "oneshot"
+publish = false
+version = "0.1.0"
+
+[dependencies]
+futures = "0.1"
+tokio-core = "0.1"
+tokio-io = "0.1"
+
+[dependencies.client]
+features = ["static"]
+path = "../client"
+
+[dependencies.driver]
+features = ["static"]
+path = "../driver"
+
+[dependencies.g]
+path = "../g"
+
+[dependencies.proto]
+path = "../proto"

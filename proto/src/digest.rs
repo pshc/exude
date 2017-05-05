@@ -26,7 +26,6 @@ impl Digest {
         hex.to_owned()
     }
 
-    #[cfg(test)]
     pub fn zero() -> Self {
         Digest([0; LEN])
     }

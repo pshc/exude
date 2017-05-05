@@ -4,6 +4,10 @@ name = "client"
 publish = false
 version = "0.1.0"
 
+[[bin]]
+doc = false
+name = "client"
+
 [dependencies]
 digest = "0.5"
 futures = "0.1"
@@ -16,5 +20,13 @@ sodiumoxide = "0.0.14"
 tokio-core = "0.1"
 tokio-io = "0.1"
 
+[dependencies.g]
+optional = true
+path = "../g"
+
 [dependencies.proto]
 path = "../proto"
+
+[features]
+default = []
+static = ["g"]

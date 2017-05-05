@@ -16,6 +16,9 @@ path = "g"
 [dependencies.issuer]
 path = "issuer"
 
+[dependencies.oneshot]
+path = "oneshot"
+
 [dependencies.proto]
 path = "proto"
 
