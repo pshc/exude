@@ -22,11 +22,9 @@ pub trait GlInterface {
     fn cleanup(&self, Box<GlCtx>);
 }
 
-pub type GlDrawFn = extern fn(&GlCtx, &mut Encoder);
-pub type GlSetupFn = extern fn(&mut Factory,
-                               RenderTargetView)
-                               -> io::Result<Box<GlCtx>>;
-pub type GlCleanupFn = extern fn(Box<GlCtx>);
+pub type GlDrawFn = extern "C" fn(&GlCtx, &mut Encoder);
+pub type GlSetupFn = extern "C" fn(&mut Factory, RenderTargetView) -> io::Result<Box<GlCtx>>;
+pub type GlCleanupFn = extern "C" fn(Box<GlCtx>);
 
 pub trait GlCtx {
     fn draw(&self, &mut Encoder);

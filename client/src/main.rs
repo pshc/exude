@@ -50,38 +50,46 @@ fn main() {
     // for sending a new driver from net to draw thread
     let (update_tx, update_rx) = mpsc::channel::<(PathBuf, Box<connector::DriverComms>)>();
 
-    let _net_thread = thread::spawn(move || {
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
+    let _net_thread = thread::spawn(
+        move || {
+            let mut core = Core::new().unwrap();
+            let handle = core.handle();
 
-        let client = TcpStream::connect(&addr, &handle).and_then(|sock| {
-            let (reader, writer) = sock.split();
+            let client = TcpStream::connect(&addr, &handle).and_then(
+                |sock| {
+                    let (reader, writer) = sock.split();
 
-            let greeting = {
-                let cached_driver = None;
-                let hello = handshake::Hello(cached_driver);
-                common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
-            };
+                    let greeting = {
+                        let cached_driver = None;
+                        let hello = handshake::Hello(cached_driver);
+                        common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
+                    };
 
-            let welcome = receive::fetch_driver(reader);
+                    let welcome = receive::fetch_driver(reader);
 
-            welcome.join(greeting).and_then(move |((r, info, path), w)| {
-                println!("driver {}", info.digest.short_hex());
+                    welcome
+                        .join(greeting)
+                        .and_then(
+                            move |((r, info, path), w)| {
+                                println!("driver {}", info.digest.short_hex());
 
-                let (driver_tx, driver_rx) = mpsc::channel();
-                let (tx, rx) = futures::sync::mpsc::unbounded();
-                let comms = connector::DriverComms {rx: driver_rx, tx: tx};
-                let net_comms = NetComms {tx: driver_tx, rx: rx};
+                                let (driver_tx, driver_rx) = mpsc::channel();
+                                let (tx, rx) = futures::sync::mpsc::unbounded();
+                                let comms = connector::DriverComms { rx: driver_rx, tx: tx };
+                                let net_comms = NetComms { tx: driver_tx, rx: rx };
 
-                // inform the draw thread about our new driver
-                update_tx.send((path, box comms)).unwrap();
+                                // inform the draw thread about our new driver
+                                update_tx.send((path, box comms)).unwrap();
 
-                box net_comms.handle(r, w).map(|_| println!("net: donezo"))
-            })
-        });
+                                box net_comms.handle(r, w).map(|_| println!("net: donezo"))
+                            },
+                        )
+                },
+            );
 
-        core.run(client).unwrap();
-    });
+            core.run(client).unwrap();
+        },
+    );
 
     type DepthFormat = gfx::format::Depth;
     const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
@@ -96,7 +104,8 @@ fn main() {
 
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
 
-    let mut basic_vis = basic::Renderer::new(&mut factory, main_color.clone()).ok()
+    let mut basic_vis = basic::Renderer::new(&mut factory, main_color.clone())
+        .ok()
         .map(|v| (v, 0.0));
     let mut text = gfx_text::new(factory.clone()).with_size(30).unwrap();
 
@@ -125,10 +134,9 @@ fn main() {
                 glutin::Event::Closed => break 'main,
 
                 glutin::Event::Resized(_w, _h) => {
-                    gfx_window_glutin::update_views(&window,
-                        &mut main_color, &mut main_depth);
-                },
-                _ => {},
+                    gfx_window_glutin::update_views(&window, &mut main_color, &mut main_depth);
+                }
+                _ => {}
             }
             // we should probably forward the events to driver?
         }
@@ -175,14 +183,16 @@ impl NetComms {
         R: AsyncRead + 'static,
         W: AsyncWrite + 'static,
     {
-        let NetComms {tx, rx} = self;
+        let NetComms { tx, rx } = self;
 
         // todo: read more than one message
-        let read = common::read_with_length(r).and_then(move |(r, vec)| {
-            tx.send(vec.into_boxed_slice())
-                .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "core: done reading"))
-                .map(|_| r)
-        });
+        let read = common::read_with_length(r).and_then(
+            move |(r, vec)| {
+                tx.send(vec.into_boxed_slice())
+                    .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "core: done reading"),)
+                    .map(|_| r)
+            },
+        );
 
         let write = rx
         .map_err(|()| io::Error::new(ErrorKind::BrokenPipe, "core: done writing"))

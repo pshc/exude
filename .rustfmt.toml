@@ -1,0 +1,9 @@
+array_layout = "Block"
+error_on_line_overflow = false
+fn_args_layout = "Block"
+fn_call_style = "Block"
+generics_indent = "Block"
+reorder_imported_names = true
+struct_lit_width = 50
+where_style = "Rfc"
+write_mode = "Overwrite"

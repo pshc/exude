@@ -26,7 +26,7 @@ impl<'de> de::Visitor<'de> for Visitor {
                 bytes[i] = byte
             } else {
                 use serde::de::Error;
-                return Err(V::Error::invalid_length(i, &self))
+                return Err(V::Error::invalid_length(i, &self));
             }
         }
         Ok(Signature(bytes))
@@ -61,18 +61,18 @@ impl Clone for Signature {
 
 impl PartialEq for Signature {
     fn eq(&self, other: &Signature) -> bool {
-        return self.0[..] == other.0[..]
+        self.0[..] == other.0[..]
     }
 }
 impl Eq for Signature {}
 
 impl Signature {
     /// Always returns valid ASCII.
-    pub fn hex_bytes(&self) -> [u8; LEN*2] {
-        let mut ascii = [b'z'; LEN*2];
+    pub fn hex_bytes(&self) -> [u8; LEN * 2] {
+        let mut ascii = [b'z'; LEN * 2];
         for (i, octet) in self.0.iter().enumerate() {
-            ascii[i*2] = HEX_CHARS[(octet >> 4) as usize];
-            ascii[i*2+1] = HEX_CHARS[(octet & 0x0f) as usize];
+            ascii[i * 2] = HEX_CHARS[(octet >> 4) as usize];
+            ascii[i * 2 + 1] = HEX_CHARS[(octet & 0x0f) as usize];
         }
         ascii
     }

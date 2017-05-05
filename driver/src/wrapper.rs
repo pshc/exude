@@ -38,7 +38,7 @@ impl Pipe {
 
     pub fn try_recv<T>(&self) -> io::Result<Option<T>>
     where
-        for<'de> T: Deserialize<'de>
+        for<'de> T: Deserialize<'de>,
     {
         let cbs = unsafe { &*self.0 };
         let mut buf_ptr = ptr::null_mut();
@@ -46,14 +46,13 @@ impl Pipe {
         if len > 0 {
             let slice = unsafe { ::std::slice::from_raw_parts(buf_ptr, len as usize) };
             let result = bincoded::deserialize_exact(slice);
-            unsafe {
-                drop(Box::from_raw(buf_ptr))
-            }
+            unsafe { drop(Box::from_raw(buf_ptr)) }
             result.map(Some)
         } else if len == 0 {
             Ok(None)
         } else {
-            Err(io::Error::new(ErrorKind::BrokenPipe, "try_recv: pipe broken"))
+            let err = io::Error::new(ErrorKind::BrokenPipe, "try_recv: pipe broken");
+            Err(err)
         }
     }
 }

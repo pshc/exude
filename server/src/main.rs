@@ -12,7 +12,7 @@ use std::io::{self, ErrorKind, Read};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use futures::{IntoFuture, Future, Stream};
+use futures::{Future, IntoFuture, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -51,65 +51,80 @@ fn serve(addr: &SocketAddr) -> io::Result<()> {
     let listener = TcpListener::bind(&addr, &handle)?;
     println!("listening to {:?}", addr);
 
-    let server = listener.incoming().for_each(|(sock, addr)| {
-        handle.spawn(serve_client(sock, addr));
-        Ok(())
-    });
+    let server = listener
+        .incoming()
+        .for_each(
+            |(sock, addr)| {
+                handle.spawn(serve_client(sock, addr));
+                Ok(())
+            },
+        );
 
     core.run(server)
 }
 
-fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item=(), Error=()>> {
-    use futures::future::{loop_fn, Loop};
+fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item = (), Error = ()>> {
+    use futures::future::{Loop, loop_fn};
 
     println!("new client from {}", addr);
 
     let (r, w) = sock.split();
     let hello = common::read_bincoded(r);
 
-    box hello.and_then(move |(r, hello)| -> IoFuture<_> {
-        println!("{} is here: {:?}", addr, hello);
+    box hello
+            .and_then(
+        move |(r, hello)| -> IoFuture<_> {
+            println!("{} is here: {:?}", addr, hello);
 
-        match hello {
-            handshake::Hello(None) => {
-                // send them the up-to-date driver
-                let driver = try_box!(HashedHeapFile::read_latest());
-                box driver.write_to(w).and_then(move |w| {
-                    Ok((r, w))
-                })
-            }
-            handshake::Hello(Some(_digest)) => {
-                // check if digest is up-to-date; if not, send delta
-                unimplemented!()
-            }
-        }
-    })
-    .and_then(move |rw| {
-
-        loop_fn(rw, move |(r, w)| {
-
-            let read_req = common::read_bincoded(r);
-            let dispatch_req = read_req.and_then(move |(r, req)| -> IoFuture<_> {
-                match req {
-                    api::UpRequest::Ping(n) => {
-                        println!("{} pinged ({})", addr, n);
-
-                        box common::write_bincoded(w, &api::DownResponse::Pong(n))
-                            .and_then(move |(w, _)| Ok(Loop::Continue((r, w))))
-                    }
-                    api::UpRequest::Bye => {
-                        println!("{} says bye", addr);
-                        box futures::future::ok(Loop::Break(()))
-                    }
+            match hello {
+                handshake::Hello(None) => {
+                    // send them the up-to-date driver
+                    let driver = try_box!(HashedHeapFile::read_latest());
+                    box driver.write_to(w).and_then(move |w| Ok((r, w)))
                 }
-            });
+                handshake::Hello(Some(_digest)) => {
+                    // check if digest is up-to-date; if not, send delta
+                    unimplemented!()
+                }
+            }
+        },
+    )
+            .and_then(
+        move |rw| {
 
-            dispatch_req
-        })
+            loop_fn(
+                rw, move |(r, w)| {
 
-    }).map(|_r| ()).map_err(move |err| {
-        println!("{} error: {}", addr, err);
-    })
+                    let read_req = common::read_bincoded(r);
+                    let dispatch_req = read_req.and_then(
+                        move |(r, req)| -> IoFuture<_> {
+                            match req {
+                                api::UpRequest::Ping(n) => {
+                                    println!("{} pinged ({})", addr, n);
+
+                                    box common::write_bincoded(w, &api::DownResponse::Pong(n))
+                                            .and_then(move |(w, _)| Ok(Loop::Continue((r, w))))
+                                }
+                                api::UpRequest::Bye => {
+                                    println!("{} says bye", addr);
+                                    box futures::future::ok(Loop::Break(()))
+                                }
+                            }
+                        },
+                    );
+
+                    dispatch_req
+                }
+            )
+
+        },
+    )
+            .map(|_r| ())
+            .map_err(
+        move |err| {
+            println!("{} error: {}", addr, err);
+        },
+    )
 }
 
 /// The bytes and hash digest of a file stored on the heap.
@@ -137,7 +152,7 @@ impl HashedHeapFile {
         let mut bin = File::open(bin_path)?;
         bin.read_exact(&mut driver_buf)?;
         if bin.read(&mut [0])? > 0 {
-            return Err(io::Error::new(ErrorKind::InvalidData, "latest bin is wrong length"));
+            return Err(io::Error::new(ErrorKind::InvalidData, "latest bin is wrong length"),);
         }
         drop(bin);
 
@@ -155,10 +170,8 @@ impl HashedHeapFile {
         let coded = Bincoded::new(&resp);
 
         box futures::future::lazy(|| coded)
-            .and_then(move |coded| common::write_with_length(w, coded))
-            .and_then(move |(w, _)| tokio_io::io::write_all(w, buf))
-            .and_then(move |(w, _)| Ok(w))
+                .and_then(move |coded| common::write_with_length(w, coded))
+                .and_then(move |(w, _)| tokio_io::io::write_all(w, buf))
+                .and_then(move |(w, _)| Ok(w))
     }
 }
-
-

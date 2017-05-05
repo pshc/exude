@@ -40,10 +40,12 @@ fn dispatch(args: &[String]) -> io::Result<()> {
 }
 
 fn usage() -> ! {
-    println!("Command patterns:
+    println!(
+        "Command patterns:
     keygen
     sign <file>
-");
+"
+    );
     process::exit(1)
 }
 
@@ -63,20 +65,26 @@ fn keygen() -> io::Result<()> {
         io::stdout().flush()?;
         let again = rpassword::read_password()?;
         if password != again {
-            return Err(io::Error::new(ErrorKind::InvalidInput, "passwords did not match"));
+            let err = io::Error::new(ErrorKind::InvalidInput, "passwords did not match");
+            return Err(err);
         }
     }
 
-    let mut pub_file = fs::OpenOptions::new().write(true).create_new(true)
+    let mut pub_file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
         .open(dir.join("public"))?;
-    let mut priv_file = fs::OpenOptions::new().write(true).create_new(true)
+    let mut priv_file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
         .open(dir.join("secret"))?;
 
     println!("Deriving encryption key...");
     let salt = pwhash::gen_salt();
     let mut box_key = secretbox::Key([0; secretbox::KEYBYTES]);
     if Err(()) == pwhash::derive_key(&mut box_key.0, password.as_bytes(), &salt, OPS, MEM) {
-        return Err(io::Error::new(ErrorKind::Other, "not enough resources for pwhash"));
+        let err = io::Error::new(ErrorKind::Other, "not enough resources for pwhash");
+        return Err(err);
     }
 
     println!("Generating and encrypting key pair...");
@@ -111,7 +119,7 @@ fn load_keys() -> io::Result<(sign::PublicKey, sign::SecretKey)> {
         let mut pub_file = File::open(dir.join("public"))?;
         pub_file.read_exact(&mut pub_bytes)?;
         if pub_file.read(&mut [0u8])? > 0 {
-            return Err(io::Error::new(ErrorKind::InvalidData, "public key too long"));
+            return Err(io::Error::new(ErrorKind::InvalidData, "public key too long"),);
         }
         public_key = sign::PublicKey(pub_bytes);
     }
@@ -137,7 +145,8 @@ fn load_keys() -> io::Result<(sign::PublicKey, sign::SecretKey)> {
     println!("Deriving encryption key...");
     let mut box_key = secretbox::Key([0; secretbox::KEYBYTES]);
     if Err(()) == pwhash::derive_key(&mut box_key.0, password.as_bytes(), &salt, OPS, MEM) {
-        return Err(io::Error::new(ErrorKind::Other, "not enough resources for pwhash"));
+        let err = io::Error::new(ErrorKind::Other, "not enough resources for pwhash");
+        return Err(err);
     }
 
     println!("Decrypting secret key...");
@@ -147,7 +156,8 @@ fn load_keys() -> io::Result<(sign::PublicKey, sign::SecretKey)> {
             .map_err(|()| io::Error::new(ErrorKind::InvalidInput, "invalid box key"))?;
 
         if plaintext.len() != sign::SECRETKEYBYTES {
-            return Err(io::Error::new(ErrorKind::InvalidData, "bad secret key length"));
+            let err = io::Error::new(ErrorKind::InvalidData, "bad secret key length");
+            return Err(err);
         }
         let mut secret_bytes = [0; sign::SECRETKEYBYTES];
         secret_bytes.copy_from_slice(&plaintext);
@@ -168,7 +178,8 @@ fn verify_keys(pk: &sign::PublicKey, sk: &sign::SecretKey) -> io::Result<()> {
     if sign::verify_detached(&sig, &random, &pk) {
         Ok(())
     } else {
-        Err(io::Error::new(ErrorKind::InvalidData, "could not verify keys"))
+        let err = io::Error::new(ErrorKind::InvalidData, "could not verify keys");
+        Err(err)
     }
 }
 
@@ -202,11 +213,7 @@ fn sign() -> io::Result<()> {
     // How do we prevent people from using old sigs to distribute old buggy drivers?
     // Expiry dates? Revocation?
     {
-        let descriptor = DriverInfo {
-            len: len,
-            digest: digest,
-            sig: sig,
-        };
+        let descriptor = DriverInfo { len: len, digest: digest, sig: sig };
         let bincoded = Bincoded::new(&descriptor)?;
 
         let mut descriptor_path = root_path.clone();
@@ -247,7 +254,7 @@ fn cred_path() -> PathBuf {
     match fs::create_dir(&path) {
         Ok(()) => (),
         Err(ref e) if e.kind() == io::ErrorKind::AlreadyExists => (),
-        Err(e) => panic!("couldn't create {:?}: {}", path, e)
+        Err(e) => panic!("couldn't create {:?}: {}", path, e),
     }
 
     path

@@ -11,11 +11,11 @@ pub struct Digest(pub [u8; LEN]);
 
 impl Digest {
     /// Always returns valid ASCII.
-    pub fn hex_bytes(&self) -> [u8; LEN*2] {
-        let mut ascii = [b'x'; LEN*2];
+    pub fn hex_bytes(&self) -> [u8; LEN * 2] {
+        let mut ascii = [b'x'; LEN * 2];
         for (i, octet) in self.0.iter().enumerate() {
-            ascii[i*2] = HEX_CHARS[(octet >> 4) as usize];
-            ascii[i*2+1] = HEX_CHARS[(octet & 0x0f) as usize];
+            ascii[i * 2] = HEX_CHARS[(octet >> 4) as usize];
+            ascii[i * 2 + 1] = HEX_CHARS[(octet & 0x0f) as usize];
         }
         ascii
     }
@@ -36,7 +36,7 @@ impl Digest {
         let mut bytes = [0x33; LEN];
         bytes[1] = 0x55;
         bytes[12] = 0x23;
-        bytes[LEN-2] = 0xf0;
+        bytes[LEN - 2] = 0xf0;
         Digest(bytes)
     }
 }
@@ -59,7 +59,7 @@ impl Display for Digest {
 fn hex() {
     let digest = Digest([0xff; LEN]);
     let hex = format!("{}", digest);
-    assert_eq!(hex.len(), LEN*2);
+    assert_eq!(hex.len(), LEN * 2);
     for b in hex.bytes() {
         assert_eq!(b, b'f');
     }
@@ -96,4 +96,3 @@ fn bincoded_repr() {
     assert_eq!(coded.as_ref().len(), LEN);
     assert_eq!(&orig.0[..], coded.as_ref());
 }
-

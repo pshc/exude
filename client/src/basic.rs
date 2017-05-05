@@ -27,23 +27,26 @@ pub struct Renderer<R: gfx::Resources, M> {
 }
 
 impl Renderer<Res, basic::Meta> {
-    pub fn new(
-        factory: &mut g::Factory,
-        render_target: RenderTargetView)
-        -> io::Result<Self>
-    {
-        let pso = factory.create_pipeline_simple(VERTEX_SHADER, FRAGMENT_SHADER, basic::new())
+    pub fn new(factory: &mut g::Factory, render_target: RenderTargetView) -> io::Result<Self> {
+        let pso = factory
+            .create_pipeline_simple(VERTEX_SHADER, FRAGMENT_SHADER, basic::new())
             .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
         let indices = [0u16, 1, 2, 2, 1, 3].into_index_buffer(factory);
-        let vertex_buffer = factory.create_buffer(4, gfx::buffer::Role::Vertex,
-            gfx::memory::Usage::Upload, gfx::Bind::empty()).unwrap();
+        let vertex_buffer = factory
+            .create_buffer(
+                4,
+                gfx::buffer::Role::Vertex,
+                gfx::memory::Usage::Upload,
+                gfx::Bind::empty(),
+            )
+            .unwrap();
         {
             let mut vbuf = factory.write_mapping(&vertex_buffer).unwrap();
-            vbuf[0] = Vertex { pos: [ -1.0, -0.25 ], color: LEFT };
-            vbuf[1] = Vertex { pos: [ -1.0,  0.25 ], color: LEFT };
-            vbuf[2] = Vertex { pos: [ -1.0, -0.25 ], color: RIGHT };
-            vbuf[3] = Vertex { pos: [ -1.0,  0.25 ], color: RIGHT };
+            vbuf[0] = Vertex { pos: [-1.0, -0.25], color: LEFT };
+            vbuf[1] = Vertex { pos: [-1.0, 0.25], color: LEFT };
+            vbuf[2] = Vertex { pos: [-1.0, -0.25], color: RIGHT };
+            vbuf[3] = Vertex { pos: [-1.0, 0.25], color: RIGHT };
         }
         let slice = gfx::Slice {
             start: 0,
@@ -52,24 +55,19 @@ impl Renderer<Res, basic::Meta> {
             instances: None,
             buffer: indices,
         };
-        let data = basic::Data {
-            vbuf: vertex_buffer,
-            out: render_target
-        };
+        let data = basic::Data { vbuf: vertex_buffer, out: render_target };
 
-        Ok(Renderer {
-            slice: slice,
-            pso: pso,
-            data: data,
-        })
+        Ok(Renderer { slice: slice, pso: pso, data: data })
     }
 
-    pub fn update(&mut self, factory: &mut g::Factory, progress: f32)
-        -> Result<(), gfx::mapping::Error>
-    {
+    pub fn update(
+        &mut self,
+        factory: &mut g::Factory,
+        progress: f32,
+    ) -> Result<(), gfx::mapping::Error> {
         let mut vbuf = factory.write_mapping(&self.data.vbuf)?;
-        vbuf[2] = Vertex { pos: [ progress*2.0 - 1.0, -0.25 ], color: RIGHT };
-        vbuf[3] = Vertex { pos: [ progress*2.0 - 1.0,  0.25 ], color: RIGHT };
+        vbuf[2] = Vertex { pos: [progress * 2.0 - 1.0, -0.25], color: RIGHT };
+        vbuf[3] = Vertex { pos: [progress * 2.0 - 1.0, 0.25], color: RIGHT };
         Ok(())
     }
 

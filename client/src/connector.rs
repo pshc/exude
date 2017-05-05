@@ -89,21 +89,22 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
         if io_handle.0.is_null() {
             // the thread could not be created.
             // error was dumped to stderr; shame we can't return it here...
-            return Err(io::Error::new(ErrorKind::Other, "could not spawn driver IO"));
+            let err = io::Error::new(ErrorKind::Other, "could not spawn driver IO");
+            return Err(err);
         }
     }
 
     rent_libloading::RentDriver::try_new(
-        box lib,
-        |lib| unsafe {
+        box lib, |lib| unsafe {
             let io_join = lib.get(b"io_join\0")?;
             let draw = lib.get(b"gl_draw\0")?;
             let setup = lib.get(b"gl_setup\0")?;
             let cleanup = lib.get(b"gl_cleanup\0")?;
             Ok((io_join, draw, setup, cleanup))
-        })
-        .map(|renter| Driver { renter, io_handle })
-        .map_err(|err| err.0)
+        }
+    )
+            .map(|renter| Driver { renter, io_handle })
+            .map_err(|err| err.0)
 }
 
 /// Generates function pointers and context for DriverCallbacks.
@@ -137,7 +138,7 @@ extern "C" fn driver_send(ctx: DriverCtx, buf: *const u8, len: i32) -> i32 {
     let slice = unsafe { std::slice::from_raw_parts(buf, len as usize) };
     match comms.tx.send(slice.into()) {
         Ok(()) => 0,
-        Err(_) => -1
+        Err(_) => -1,
     }
 }
 
@@ -156,6 +157,6 @@ extern "C" fn driver_try_recv(ctx: DriverCtx, buf_out: *mut *mut u8) -> i32 {
             len as i32
         }
         Err(mpsc::TryRecvError::Empty) => 0,
-        Err(mpsc::TryRecvError::Disconnected) => -1
+        Err(mpsc::TryRecvError::Disconnected) => -1,
     }
 }
