@@ -12,9 +12,11 @@ pub type Res = gfx_device_gl::Resources;
 pub type Command = gfx_device_gl::CommandBuffer;
 pub type Factory = gfx_device_gl::Factory;
 pub type ColorFormat = gfx::format::Rgba8;
+pub type DepthFormat = gfx::format::Depth;
 
 pub type Encoder = gfx::Encoder<Res, Command>;
 pub type RenderTargetView = gfx::handle::RenderTargetView<Res, ColorFormat>;
+pub type DepthStencilView = gfx::handle::DepthStencilView<Res, DepthFormat>;
 
 pub trait GlInterface {
     fn draw(&self, &GlCtx, &mut Encoder);

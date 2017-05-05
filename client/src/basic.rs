@@ -20,13 +20,14 @@ gfx_defines! {
 const LEFT: [f32; 3] = [1.0, 0.0, 0.3];
 const RIGHT: [f32; 3] = [0.3, 0.0, 1.0];
 
-pub struct Renderer<R: gfx::Resources, M> {
+pub struct Renderer<R: gfx::Resources> {
     slice: gfx::Slice<R>,
-    pso: gfx::PipelineState<R, M>,
+    pso: gfx::PipelineState<R, basic::Meta>,
     data: basic::Data<R>,
+    progress: f32,
 }
 
-impl Renderer<Res, basic::Meta> {
+impl Renderer<Res> {
     pub fn new(factory: &mut g::Factory, render_target: RenderTargetView) -> io::Result<Self> {
         let pso = factory
             .create_pipeline_simple(VERTEX_SHADER, FRAGMENT_SHADER, basic::new())
@@ -57,18 +58,15 @@ impl Renderer<Res, basic::Meta> {
         };
         let data = basic::Data { vbuf: vertex_buffer, out: render_target };
 
-        Ok(Renderer { slice: slice, pso: pso, data: data })
+        Ok(Renderer { slice, pso, data, progress: 0.0 })
     }
 
-    pub fn update(
-        &mut self,
-        factory: &mut g::Factory,
-        progress: f32,
-    ) -> Result<(), gfx::mapping::Error> {
-        let mut vbuf = factory.write_mapping(&self.data.vbuf)?;
-        vbuf[2] = Vertex { pos: [progress * 2.0 - 1.0, -0.25], color: RIGHT };
-        vbuf[3] = Vertex { pos: [progress * 2.0 - 1.0, 0.25], color: RIGHT };
-        Ok(())
+    pub fn update(&mut self, factory: &mut g::Factory, _: &g::RenderTargetView) {
+        self.progress += 0.01;
+        let width = self.progress * 2.0 - 1.0;
+        let mut vbuf = factory.write_mapping(&self.data.vbuf).unwrap(); // xxx
+        vbuf[2] = Vertex { pos: [width, -0.25], color: RIGHT };
+        vbuf[3] = Vertex { pos: [width, 0.25], color: RIGHT };
     }
 
     pub fn draw(&self, mut encoder: &mut Encoder) {

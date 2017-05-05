@@ -41,6 +41,7 @@ impl Driver {
         let handle = mem::replace(&mut self.io_handle, IoHandle(ptr::null_mut()));
         assert!(!handle.0.is_null());
         let cb_ptr = renter.rent(|syms| (syms.0)(handle));
+        println!("Final driver cleanup.");
         let mut callbacks: Box<DriverCallbacks> = unsafe { Box::from_raw(cb_ptr) };
         let comms = DriverComms::from_callbacks(&mut callbacks);
         drop(comms);
