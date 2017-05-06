@@ -23,6 +23,7 @@ rental! {
             lib: Box<Library>,
             syms: (Symbol<'lib, driver_abi::TeardownFn>,
                    Symbol<'lib, g::GlDrawFn>,
+                   Symbol<'lib, g::GlUpdateFn>,
                    Symbol<'lib, g::GlSetupFn>,
                    Symbol<'lib, g::GlCleanupFn>),
         }
@@ -52,7 +53,7 @@ impl Driver {
 impl Drop for Driver {
     fn drop(&mut self) {
         if !self.handle.0.is_null() {
-            let _ = writeln!(io::stderr(), "WARNING: leaking driver thread");
+            let _ = writeln!(io::stderr(), "WARNING: leaking driver state");
             debug_assert!(false, "must call Driver::join");
         }
     }
@@ -63,12 +64,16 @@ impl g::GfxInterface for Driver {
         self.renter.rent(|syms| (syms.1)(ctx, encoder))
     }
 
+    fn update(&self, ctx: &mut g::GfxCtx) {
+        self.renter.rent(|syms| (syms.2)(ctx, self.handle))
+    }
+
     fn gfx_setup(&self, f: &mut g::Factory, v: g::RenderTargetView) -> io::Result<Box<g::GfxCtx>> {
-        self.renter.rent(|syms| (syms.2)(f, v))
+        self.renter.rent(|syms| (syms.3)(self.handle, f, v))
     }
 
     fn gfx_cleanup(&self, ctx: Box<g::GfxCtx>) {
-        self.renter.rent(|syms| (syms.3)(ctx))
+        self.renter.rent(|syms| (syms.4)(ctx))
     }
 }
 
@@ -98,9 +103,10 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
         box lib, |lib| unsafe {
             let teardown = lib.get(b"teardown\0")?;
             let draw = lib.get(b"gl_draw\0")?;
+            let update = lib.get(b"gl_update\0")?;
             let setup = lib.get(b"gl_setup\0")?;
             let cleanup = lib.get(b"gl_cleanup\0")?;
-            Ok((teardown, draw, setup, cleanup))
+            Ok((teardown, draw, update, setup, cleanup))
         }
     )
             .map(|renter| Driver { renter, handle })

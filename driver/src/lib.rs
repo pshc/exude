@@ -9,10 +9,12 @@ pub mod comms;
 mod driver_abi;
 
 use std::io::{self, ErrorKind, Write};
-use std::thread::{self, JoinHandle};
+use std::mem;
+use std::sync::Arc;
 
 use libc::c_void;
 
+use comms::{Pipe, Wrapper};
 use driver_abi::DriverCallbacks;
 use g::{DriverHandle, Encoder, GfxCtx, Res, gfx};
 use g::gfx::traits::FactoryExt;
@@ -23,77 +25,57 @@ pub extern "C" fn version() -> u32 {
     0
 }
 
-struct CallbacksPtr(*mut DriverCallbacks);
-unsafe impl Send for CallbacksPtr {}
-
-pub fn io_thread<P: comms::Pipe>(pipe: &P) {
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    let mut line = String::new();
-    loop {
-        match pipe.try_recv::<api::DownResponse>() {
-            Ok(None) => (),
-            Ok(Some(resp)) => {
-                println!("=== {:?} ===", resp);
-            }
-            Err(_) => println!("driver: cannot read"),
-        }
-
-        print!("> ");
-        let _res = stdout.flush();
-        debug_assert!(_res.is_ok());
-
-        line.clear();
-        let line = match stdin.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => &line,
-            Err(e) => {
-                println!("{}", e);
-                break;
-            }
-        };
-
-        let line = line.trim();
-        if line == "q" {
-            break;
-        }
-
-        if let Ok(n) = line.parse::<u32>() {
-            println!("n: {}", n);
-            pipe.send(&api::UpRequest::Ping(n)).unwrap();
-        }
-    }
-}
-
 #[no_mangle]
 pub extern "C" fn setup(cbs: *mut DriverCallbacks) -> DriverHandle {
-    let pipe = comms::Wrapper::new(cbs);
-
-    let builder = thread::Builder::new().name("driver_io".into());
-    let joiner: io::Result<JoinHandle<CallbacksPtr>> = builder.spawn(
-        move || {
-            io_thread(&pipe);
-            CallbacksPtr(pipe.consume())
-        },
-    );
-
-    DriverHandle(
-        match joiner {
-            Ok(joiner) => Box::into_raw(box joiner) as *mut c_void,
-            Err(e) => {
-                let _ = writeln!(io::stderr(), "IO thread creation: {}", e);
-                std::ptr::null_mut()
-            }
-        },
-    )
+    let pipe = Wrapper::new(cbs);
+    let state = DriverState::new(pipe);
+    let ptr = match state {
+        Ok(arc) => Arc::into_raw(arc) as *const c_void,
+        Err(e) => {
+            let _ = writeln!(io::stderr(), "Driver setup: {}", e);
+            std::ptr::null()
+        }
+    };
+    DriverHandle(ptr)
 }
 
 #[no_mangle]
 pub extern "C" fn teardown(handle: DriverHandle) -> *mut DriverCallbacks {
     assert!(!handle.0.is_null());
-    let joiner = unsafe { Box::from_raw(handle.0 as *mut JoinHandle<CallbacksPtr>) };
-    let ptr = joiner.join().unwrap(); // TODO decide how to handle child panics
-    ptr.0
+    let arc = unsafe { Arc::from_raw(handle.0 as *const DriverState<Wrapper>) };
+    match Arc::try_unwrap(arc) {
+        Ok(state) => {
+            let wrapper: Wrapper = state.shutdown();
+            wrapper.consume()
+        }
+        Err(_arc) => {
+            println!("teardown: DriverHandle still held somewhere!");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// This is what we stash inside DriverHandle.
+pub struct DriverState<P> {
+    pipe: P,
+}
+
+impl<P> DriverState<P> {
+    pub fn new(pipe: P) -> io::Result<Arc<Self>> {
+        let state = DriverState { pipe };
+        Ok(Arc::new(state))
+    }
+
+    pub fn shutdown(self) -> P {
+        self.pipe
+    }
+
+    unsafe fn borrow(handle: DriverHandle) -> Arc<Self> {
+        let arc = Arc::from_raw(handle.0 as *const DriverState<P>);
+        let borrow = arc.clone();
+        mem::forget(arc);
+        borrow
+    }
 }
 
 gfx_defines! {
@@ -116,28 +98,46 @@ const TRIANGLE: [Vertex; 3] = [
 
 #[no_mangle]
 pub extern "C" fn gl_setup(
+    handle: DriverHandle,
     factory: &mut g::Factory,
-    render_target: g::RenderTargetView,
+    rtv: g::RenderTargetView,
 ) -> io::Result<Box<g::GfxCtx>> {
 
-    let pso = factory
-        .create_pipeline_simple(
-            include_bytes!("shader/triangle_150.glslv"),
-            include_bytes!("shader/triangle_150.glslf"),
-            pipe::new(),
-        )
-        .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
-
-    let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&TRIANGLE, ());
-    let data = pipe::Data { vbuf: vertex_buffer, out: render_target };
-
-    Ok(box RenderImpl { slice: slice, pso: pso, data: data })
+    let state = unsafe { DriverState::<Wrapper>::borrow(handle) };
+    let render_impl = RenderImpl::new(state.as_ref(), factory, rtv)?;
+    Ok(box render_impl)
 }
 
-struct RenderImpl<R: gfx::Resources, M> {
+pub struct RenderImpl<R: gfx::Resources, M> {
     slice: gfx::Slice<R>,
     pso: gfx::PipelineState<R, M>,
     data: pipe::Data<R>,
+}
+
+impl RenderImpl<g::Res, pipe::Meta> {
+    pub fn new(
+        _: &DriverState<Wrapper>,
+        factory: &mut g::Factory,
+        rtv: g::RenderTargetView,
+    ) -> io::Result<Self> {
+        let pso = factory
+            .create_pipeline_simple(
+                include_bytes!("shader/triangle_150.glslv"),
+                include_bytes!("shader/triangle_150.glslf"),
+                pipe::new(),
+            )
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+
+        let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&TRIANGLE, ());
+        let data = pipe::Data { vbuf: vertex_buffer, out: rtv };
+
+        Ok(RenderImpl { slice, pso, data })
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn gl_update(ctx: &mut GfxCtx, handle: DriverHandle) {
+    ctx.update(handle);
 }
 
 #[no_mangle]
@@ -149,6 +149,16 @@ pub extern "C" fn gl_draw(ctx: &GfxCtx, encoder: &mut Encoder) {
 impl GfxCtx for RenderImpl<Res, pipe::Meta> {
     fn draw(&self, mut encoder: &mut Encoder) {
         encoder.draw(&self.slice, &self.pso, &self.data)
+    }
+
+    fn update(&mut self, handle: DriverHandle) {
+        let state = unsafe { DriverState::<Wrapper>::borrow(handle) };
+
+        while let Some(msg) = state.pipe.try_recv::<api::DownResponse>().unwrap() {
+            println!("=== {:?} ===", msg);
+        }
+
+        // update gpu state here...
     }
 }
 
@@ -165,5 +175,6 @@ fn check_gl_types() {
     let _: driver_abi::TeardownFn = teardown;
     let _: g::GlSetupFn = gl_setup;
     let _: g::GlDrawFn = gl_draw;
+    let _: g::GlUpdateFn = gl_update;
     let _: g::GlCleanupFn = gl_cleanup;
 }

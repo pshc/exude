@@ -224,7 +224,9 @@ impl Engine<g::Res> for Hot {
             }
         }
 
-        if self.driver.is_none() {
+        if let Some((ref driver, ref mut ctx)) = self.driver {
+            driver.update(&mut **ctx);
+        } else {
             self.basic_vis.update(factory, &self.main_color);
         }
     }
@@ -234,7 +236,7 @@ impl Drop for Hot {
     fn drop(&mut self) {
         if let Some((driver, ctx)) = self.driver.take() {
             driver.gfx_cleanup(ctx);
-            println!("Waiting on driver's IO thread...");
+            println!("Waiting for driver cleanup...");
             driver.join();
         }
     }

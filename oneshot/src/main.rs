@@ -14,6 +14,7 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
 use futures::Future;
+use g::DriverHandle;
 use g::gfx::Device;
 use g::gfx_text;
 use g::gfx_window_glutin;
@@ -83,10 +84,7 @@ fn main() {
         },
     );
 
-    let driver_io = thread::Builder::new()
-        .name("driver_io".into())
-        .spawn(move || driver::io_thread(&io_comms))
-        .unwrap();
+    let handle = driver::setup(&io_comms);
 
     let builder = glutin::WindowBuilder::new()
         .with_title("Standalone".to_string())
@@ -121,8 +119,8 @@ fn main() {
         device.cleanup();
     }
 
-    engine.cleanup();
-    driver_io.join().unwrap();
+    let handle = engine.cleanup();
+    let callbacks = driver::teardown(handle);
 }
 
 struct StaticComms {
@@ -163,6 +161,7 @@ impl driver::comms::Pipe for StaticComms {
 /// Our statically linked Engine.
 struct Oneshot {
     ctx: Box<g::GfxCtx>,
+    handle: DriverHandle,
     main_color: g::RenderTargetView,
     main_depth: g::DepthStencilView,
     text: gfx_text::Renderer<g::Res, g::Factory>,
@@ -170,22 +169,31 @@ struct Oneshot {
 
 impl Oneshot {
     fn new(
+        handle: DriverHandle,
         factory: &mut g::Factory,
         rtv: g::RenderTargetView,
         dsv: g::DepthStencilView,
     ) -> io::Result<Self> {
 
-        let ctx = driver::gl_setup(factory, rtv.clone())?;
+        let ctx = driver::gl_setup(handle, factory, rtv.clone())?;
 
         let text = gfx_text::new(factory.clone())
             .with_size(30)
             .build()
             .unwrap(); // xxx
-        Ok(Oneshot { ctx, main_color: rtv, main_depth: dsv, text })
+        Ok(
+            Oneshot {
+                ctx,
+                handle,
+                main_color: rtv,
+                main_depth: dsv,
+                text,
+            },
+        )
     }
 
-    fn cleanup(self) {
-        driver::gl_cleanup(self.ctx);
+    fn cleanup(self) -> DriverHandle {
+        driver::gl_cleanup(self.handle, self.ctx);
     }
 }
 
