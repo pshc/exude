@@ -14,8 +14,8 @@ path = "../g"
 path = "../proto"
 
 [features]
-default = []
-static = ["g"]
+static_gl = ["g", "g/gl"]
+static_metal = ["g", "g/metal"]
 
 [lib]
 crate-type = ["dylib"]

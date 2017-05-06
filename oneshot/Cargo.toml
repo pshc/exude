@@ -10,11 +10,9 @@ tokio-core = "0.1"
 tokio-io = "0.1"
 
 [dependencies.client]
-features = ["static"]
 path = "../client"
 
 [dependencies.driver]
-features = ["static"]
 path = "../driver"
 
 [dependencies.g]
@@ -22,3 +20,7 @@ path = "../g"
 
 [dependencies.proto]
 path = "../proto"
+
+[features]
+default = ["client/static_gl", "driver/static_gl", "g/gl"]
+metal = ["client/static_metal", "driver/static_metal", "g/metal"]
