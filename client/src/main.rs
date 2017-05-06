@@ -41,7 +41,7 @@ use g::gfx::Device;
 use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
-use g::GlInterface;
+use g::GfxInterface;
 
 use proto::handshake;
 
@@ -134,7 +134,7 @@ fn main() {
 /// Our driver-loading Engine.
 struct Hot {
     basic_vis: basic::Renderer<g::Res>,
-    driver: Option<(connector::Driver, Box<g::GlCtx>)>,
+    driver: Option<(connector::Driver, Box<g::GfxCtx>)>,
     main_color: g::RenderTargetView,
     main_depth: g::DepthStencilView,
     text: gfx_text::Renderer<g::Res, g::Factory>,
@@ -197,15 +197,15 @@ impl Engine<g::Res> for Hot {
                     // Is there already a driver running?
                     if let Some((old, old_ctx)) = self.driver.take() {
                         // We should definitely do this asynchronously.
-                        old.cleanup(old_ctx);
+                        old.gfx_cleanup(old_ctx);
                         println!("Waiting for old driver...");
-                        old.io_join();
+                        old.join();
                     } else {
                         println!("Setting up driver...");
                     }
                     io::stdout().flush().unwrap();
 
-                    match new_driver.setup(factory, self.main_color.clone()) {
+                    match new_driver.gfx_setup(factory, self.main_color.clone()) {
                         Ok(ctx) => {
                             self.driver = Some((new_driver, ctx));
                             println!("Driver OK!");
@@ -213,7 +213,7 @@ impl Engine<g::Res> for Hot {
                         Err(e) => {
                             println!("Driver: {}", e);
                             println!("Waiting for failed driver...");
-                            new_driver.io_join();
+                            new_driver.join();
                         }
                     }
                 }
@@ -233,9 +233,9 @@ impl Engine<g::Res> for Hot {
 impl Drop for Hot {
     fn drop(&mut self) {
         if let Some((driver, ctx)) = self.driver.take() {
-            driver.cleanup(ctx);
+            driver.gfx_cleanup(ctx);
             println!("Waiting on driver's IO thread...");
-            driver.io_join();
+            driver.join();
         }
     }
 }

@@ -13,8 +13,8 @@ use std::thread::{self, JoinHandle};
 
 use libc::c_void;
 
-use driver_abi::{DriverCallbacks, IoHandle};
-use g::{Encoder, GlCtx, Res, gfx};
+use driver_abi::DriverCallbacks;
+use g::{DriverHandle, Encoder, GfxCtx, Res, gfx};
 use g::gfx::traits::FactoryExt;
 use proto::api;
 
@@ -66,7 +66,7 @@ pub fn io_thread<P: comms::Pipe>(pipe: &P) {
 }
 
 #[no_mangle]
-pub extern "C" fn io_spawn(cbs: *mut DriverCallbacks) -> IoHandle {
+pub extern "C" fn setup(cbs: *mut DriverCallbacks) -> DriverHandle {
     let pipe = comms::Wrapper::new(cbs);
 
     let builder = thread::Builder::new().name("driver_io".into());
@@ -77,7 +77,7 @@ pub extern "C" fn io_spawn(cbs: *mut DriverCallbacks) -> IoHandle {
         },
     );
 
-    IoHandle(
+    DriverHandle(
         match joiner {
             Ok(joiner) => Box::into_raw(box joiner) as *mut c_void,
             Err(e) => {
@@ -89,7 +89,7 @@ pub extern "C" fn io_spawn(cbs: *mut DriverCallbacks) -> IoHandle {
 }
 
 #[no_mangle]
-pub extern "C" fn io_join(handle: IoHandle) -> *mut DriverCallbacks {
+pub extern "C" fn teardown(handle: DriverHandle) -> *mut DriverCallbacks {
     assert!(!handle.0.is_null());
     let joiner = unsafe { Box::from_raw(handle.0 as *mut JoinHandle<CallbacksPtr>) };
     let ptr = joiner.join().unwrap(); // TODO decide how to handle child panics
@@ -118,7 +118,7 @@ const TRIANGLE: [Vertex; 3] = [
 pub extern "C" fn gl_setup(
     factory: &mut g::Factory,
     render_target: g::RenderTargetView,
-) -> io::Result<Box<g::GlCtx>> {
+) -> io::Result<Box<g::GfxCtx>> {
 
     let pso = factory
         .create_pipeline_simple(
@@ -141,19 +141,19 @@ struct RenderImpl<R: gfx::Resources, M> {
 }
 
 #[no_mangle]
-pub extern "C" fn gl_draw(ctx: &GlCtx, encoder: &mut Encoder) {
+pub extern "C" fn gl_draw(ctx: &GfxCtx, encoder: &mut Encoder) {
     ctx.draw(encoder);
     std::thread::sleep(std::time::Duration::from_millis(10));
 }
 
-impl GlCtx for RenderImpl<Res, pipe::Meta> {
+impl GfxCtx for RenderImpl<Res, pipe::Meta> {
     fn draw(&self, mut encoder: &mut Encoder) {
         encoder.draw(&self.slice, &self.pso, &self.data)
     }
 }
 
 #[no_mangle]
-pub extern "C" fn gl_cleanup(ctx: Box<GlCtx>) {
+pub extern "C" fn gl_cleanup(ctx: Box<GfxCtx>) {
     drop(ctx);
     println!("cleaned up GL");
 }
@@ -161,8 +161,8 @@ pub extern "C" fn gl_cleanup(ctx: Box<GlCtx>) {
 #[allow(dead_code)]
 fn check_gl_types() {
     let _: driver_abi::VersionFn = version;
-    let _: driver_abi::IoSpawnFn = io_spawn;
-    let _: driver_abi::IoJoinFn = io_join;
+    let _: driver_abi::SetupFn = setup;
+    let _: driver_abi::TeardownFn = teardown;
     let _: g::GlSetupFn = gl_setup;
     let _: g::GlDrawFn = gl_draw;
     let _: g::GlCleanupFn = gl_cleanup;

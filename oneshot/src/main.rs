@@ -162,7 +162,7 @@ impl driver::comms::Pipe for StaticComms {
 
 /// Our statically linked Engine.
 struct Oneshot {
-    ctx: Box<g::GlCtx>,
+    ctx: Box<g::GfxCtx>,
     main_color: g::RenderTargetView,
     main_depth: g::DepthStencilView,
     text: gfx_text::Renderer<g::Res, g::Factory>,

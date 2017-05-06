@@ -10,10 +10,14 @@ pub extern crate gfx_window_glutin;
 pub extern crate gfx_window_metal;
 #[cfg(feature = "gl")]
 pub extern crate glutin;
+extern crate libc;
 pub extern crate winit;
 
 pub mod macros;
 
+/// Opaque user pointer passed into all driver functions.
+pub struct DriverHandle(pub *mut libc::c_void);
+unsafe impl Send for DriverHandle {}
 
 pub type ColorFormat = gfx::format::Rgba8;
 pub type DepthFormat = gfx::format::Depth;
@@ -33,17 +37,17 @@ macro_rules! backend_items {
         pub type RenderTargetView = gfx::handle::RenderTargetView<Res, ColorFormat>;
         pub type DepthStencilView = gfx::handle::DepthStencilView<Res, DepthFormat>;
 
-        pub trait GlInterface {
-            fn draw(&self, &GlCtx, &mut Encoder);
-            fn setup(&self, &mut Factory, RenderTargetView) -> io::Result<Box<GlCtx>>;
-            fn cleanup(&self, Box<GlCtx>);
+        pub trait GfxInterface {
+            fn draw(&self, &GfxCtx, &mut Encoder);
+            fn gfx_setup(&self, &mut Factory, RenderTargetView) -> io::Result<Box<GfxCtx>>;
+            fn gfx_cleanup(&self, Box<GfxCtx>);
         }
 
-        pub type GlDrawFn = extern "C" fn(&GlCtx, &mut Encoder);
-        pub type GlSetupFn = extern "C" fn(&mut Factory, RenderTargetView) -> io::Result<Box<GlCtx>>;
-        pub type GlCleanupFn = extern "C" fn(Box<GlCtx>);
+        pub type GlDrawFn = extern "C" fn(&GfxCtx, &mut Encoder);
+        pub type GlSetupFn = extern "C" fn(&mut Factory, RenderTargetView) -> io::Result<Box<GfxCtx>>;
+        pub type GlCleanupFn = extern "C" fn(Box<GfxCtx>);
 
-        pub trait GlCtx {
+        pub trait GfxCtx {
             fn draw(&self, &mut Encoder);
         }
     )
