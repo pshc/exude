@@ -14,6 +14,7 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
 use futures::Future;
+use g::gfx::Device;
 use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
@@ -21,8 +22,9 @@ use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use tokio_io::AsyncRead;
 
-use client::{common, net, render_loop};
-use client::common::IoFuture;
+use client::net;
+use client::common::{self, IoFuture};
+use client::render_loop::{self, Engine};
 use proto::{Bincoded, Digest, handshake};
 use proto::bincoded;
 use proto::serde::{Deserialize, Serialize};
@@ -90,14 +92,34 @@ fn main() {
         .with_title("Standalone".to_string())
         .with_dimensions(1024, 768)
         .with_vsync();
-    let (window, device, mut factory, main_color, main_depth) =
+    let (window, mut device, mut factory, main_color, main_depth) =
         gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(builder);
 
     let mut engine = Oneshot::new(&mut factory, main_color, main_depth).unwrap();
 
-    let encoder = factory.create_command_buffer().into();
+    let mut encoder = factory.create_command_buffer().into();
 
-    render_loop::render_loop(window, device, factory, encoder, &mut engine);
+    'main: loop {
+        for event in window.poll_events() {
+            if render_loop::should_quit(&event) {
+                break 'main;
+            }
+            if let g::winit::Event::Resized(_w, _h) = *&event {
+                gfx_window_glutin::update_views(
+                    &window,
+                    &mut engine.main_color,
+                    &mut engine.main_depth,
+                );
+            }
+        }
+
+        engine.update(&mut factory);
+        engine.draw(&mut encoder);
+
+        encoder.flush(&mut device);
+        window.swap_buffers().unwrap();
+        device.cleanup();
+    }
 
     engine.cleanup();
     driver_io.join().unwrap();
@@ -167,7 +189,7 @@ impl Oneshot {
     }
 }
 
-impl render_loop::Engine<g::Res> for Oneshot {
+impl Engine<g::Res> for Oneshot {
     type CommandBuffer = g::Command;
     type Factory = g::Factory;
 
@@ -175,10 +197,6 @@ impl render_loop::Engine<g::Res> for Oneshot {
         encoder.clear(&self.main_color, BLACK);
         driver::gl_draw(&*self.ctx, encoder);
         self.text.add("Oneshot", [10, 10], WHITE);
-    }
-
-    fn resize(&mut self, window: &glutin::Window) {
-        gfx_window_glutin::update_views(&window, &mut self.main_color, &mut self.main_depth);
     }
 
     fn update(&mut self, _: &mut g::Factory) {}

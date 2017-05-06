@@ -32,10 +32,12 @@ use std::sync::mpsc;
 use std::thread;
 
 use futures::Future;
+use render_loop::Engine;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use tokio_io::AsyncRead;
 
+use g::gfx::Device;
 use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
@@ -97,20 +99,34 @@ fn main() {
         .with_title("Germ".to_string())
         .with_dimensions(1024, 768)
         .with_vsync();
-    let (window, device, mut factory, main_color, main_depth) =
+    let (window, mut device, mut factory, main_color, main_depth) =
         gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(builder);
 
-    let mut engine = Hot::new(
-        &mut factory,
-        main_color.clone(),
-        main_depth.clone(),
-        update_rx,
-    )
-            .unwrap();
+    let mut engine = Hot::new(&mut factory, main_color, main_depth, update_rx).unwrap();
 
-    let encoder = factory.create_command_buffer().into();
+    let mut encoder = factory.create_command_buffer().into();
 
-    render_loop::render_loop(window, device, factory, encoder, &mut engine);
+    'main: loop {
+        for event in window.poll_events() {
+            if render_loop::should_quit(&event) {
+                break 'main;
+            }
+            if let g::glutin::Event::Resized(_w, _h) = *&event {
+                gfx_window_glutin::update_views(
+                    &window,
+                    &mut engine.main_color,
+                    &mut engine.main_depth,
+                );
+            }
+        }
+
+        engine.update(&mut factory);
+        engine.draw(&mut encoder);
+
+        encoder.flush(&mut device);
+        window.swap_buffers().unwrap();
+        device.cleanup();
+    }
 
     drop(engine); // waits for driver cleanup
 }
@@ -153,7 +169,7 @@ impl Hot {
     }
 }
 
-impl render_loop::Engine<g::Res> for Hot {
+impl Engine<g::Res> for Hot {
     type CommandBuffer = g::Command;
     type Factory = g::Factory;
 
@@ -168,10 +184,6 @@ impl render_loop::Engine<g::Res> for Hot {
             self.text.add("Loading...", [10, 10], WHITE);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-    }
-
-    fn resize(&mut self, window: &glutin::Window) {
-        gfx_window_glutin::update_views(&window, &mut self.main_color, &mut self.main_depth);
     }
 
     fn update(&mut self, factory: &mut g::Factory) {
