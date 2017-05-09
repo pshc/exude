@@ -59,20 +59,20 @@ impl Drop for Driver {
     }
 }
 
-impl g::GfxInterface for Driver {
-    fn draw(&self, ctx: &g::GfxCtx, encoder: &mut g::Encoder) {
+impl Driver {
+    pub fn draw(&self, ctx: g::GfxCtx, encoder: &mut g::Encoder) {
         self.renter.rent(|syms| (syms.1)(ctx, encoder))
     }
 
-    fn update(&self, ctx: &mut g::GfxCtx) {
+    pub fn update(&self, ctx: g::GfxCtx) {
         self.renter.rent(|syms| (syms.2)(ctx, self.handle))
     }
 
-    fn gfx_setup(&self, f: &mut g::Factory, v: g::RenderTargetView) -> io::Result<Box<g::GfxCtx>> {
+    pub fn gfx_setup(&self, f: &mut g::Factory, v: g::RenderTargetView) -> Option<g::GfxCtx> {
         self.renter.rent(|syms| (syms.3)(self.handle, f, v))
     }
 
-    fn gfx_cleanup(&self, ctx: Box<g::GfxCtx>) {
+    pub fn gfx_cleanup(&self, ctx: g::GfxCtx) {
         self.renter.rent(|syms| (syms.4)(ctx))
     }
 }

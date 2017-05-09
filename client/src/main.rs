@@ -41,7 +41,6 @@ use g::gfx::Device;
 use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
-use g::GfxInterface;
 
 use proto::handshake;
 
@@ -134,7 +133,7 @@ fn main() {
 /// Our driver-loading Engine.
 struct Hot {
     basic_vis: basic::Renderer<g::Res>,
-    driver: Option<(connector::Driver, Box<g::GfxCtx>)>,
+    driver: Option<(connector::Driver, g::GfxCtx)>,
     main_color: g::RenderTargetView,
     main_depth: g::DepthStencilView,
     text: gfx_text::Renderer<g::Res, g::Factory>,
@@ -176,8 +175,8 @@ impl Engine<g::Res> for Hot {
     fn draw(&mut self, encoder: &mut g::Encoder) {
         encoder.clear(&self.main_color, BLACK);
 
-        if let Some((ref driver, ref ctx)) = self.driver {
-            driver.draw(&**ctx, encoder);
+        if let Some((ref driver, ctx)) = self.driver {
+            driver.draw(ctx, encoder);
             self.text.add("Active", [10, 10], WHITE);
         } else {
             self.basic_vis.draw(encoder);
@@ -206,12 +205,11 @@ impl Engine<g::Res> for Hot {
                     io::stdout().flush().unwrap();
 
                     match new_driver.gfx_setup(factory, self.main_color.clone()) {
-                        Ok(ctx) => {
+                        Some(ctx) => {
                             self.driver = Some((new_driver, ctx));
                             println!("Driver OK!");
                         }
-                        Err(e) => {
-                            println!("Driver: {}", e);
+                        None => {
                             println!("Waiting for failed driver...");
                             new_driver.join();
                         }
@@ -224,8 +222,8 @@ impl Engine<g::Res> for Hot {
             }
         }
 
-        if let Some((ref driver, ref mut ctx)) = self.driver {
-            driver.update(&mut **ctx);
+        if let Some((ref driver, ctx)) = self.driver {
+            driver.update(ctx);
         } else {
             self.basic_vis.update(factory, &self.main_color);
         }
