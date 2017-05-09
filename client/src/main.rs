@@ -223,7 +223,7 @@ impl Engine<g::Res> for Hot {
         }
 
         if let Some((ref driver, ref mut ctx)) = self.driver {
-            driver.update(ctx.borrow_mut());
+            driver.update(ctx.borrow_mut(), factory);
         } else {
             self.basic_vis.update(factory, &self.main_color);
         }

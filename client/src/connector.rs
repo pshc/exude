@@ -64,8 +64,8 @@ impl Driver {
         self.renter.rent(|syms| (syms.1)(ctx, encoder))
     }
 
-    pub fn update(&self, ctx: g::GfxRefMut) {
-        self.renter.rent(|syms| (syms.2)(ctx, self.handle))
+    pub fn update(&self, ctx: g::GfxRefMut, factory: &mut g::Factory) {
+        self.renter.rent(|syms| (syms.2)(ctx, self.handle, factory))
     }
 
     pub fn gfx_setup(&self, f: &mut g::Factory, v: g::RenderTargetView) -> Option<g::GfxBox> {

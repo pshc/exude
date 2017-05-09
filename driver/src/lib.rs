@@ -144,10 +144,10 @@ impl RenderImpl<g::Res> {
 }
 
 #[no_mangle]
-pub extern "C" fn gl_update(ctx: g::GfxRefMut, handle: DriverHandle) {
+pub extern "C" fn gl_update(ctx: g::GfxRefMut, handle: DriverHandle, factory: &mut g::Factory) {
     let render: *mut RenderImpl<Res> = *ctx.0 as *mut RenderImpl<Res>;
     let render: &mut RenderImpl<Res> = unsafe { &mut *render };
-    render.update(handle);
+    render.update(handle, factory);
 }
 
 #[no_mangle]
@@ -163,7 +163,7 @@ impl RenderImpl<Res> {
         encoder.draw(&self.slice, &self.pso, &self.data)
     }
 
-    pub fn update(&mut self, handle: DriverHandle) {
+    pub fn update(&mut self, handle: DriverHandle, factory: &mut g::Factory) {
         let state = unsafe { DriverState::<Wrapper>::borrow(handle) };
 
         while let Some(msg) = state.pipe.try_recv::<api::DownResponse>().unwrap() {
@@ -171,6 +171,7 @@ impl RenderImpl<Res> {
         }
 
         // update gpu state here...
+        let _ = factory;
     }
 }
 

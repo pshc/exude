@@ -43,7 +43,7 @@ macro_rules! backend_items {
         pub type DepthStencilView = gfx::handle::DepthStencilView<Res, DepthFormat>;
 
         pub type GlDrawFn = extern "C" fn(GfxRef, &mut Encoder);
-        pub type GlUpdateFn = extern "C" fn(GfxRefMut, DriverHandle);
+        pub type GlUpdateFn = extern "C" fn(GfxRefMut, DriverHandle, &mut Factory);
         pub type GlSetupFn = extern "C" fn(DriverHandle, &mut Factory, RenderTargetView) -> Option<GfxBox>;
         pub type GlCleanupFn = extern "C" fn(GfxBox);
 
