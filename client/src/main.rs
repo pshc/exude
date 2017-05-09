@@ -119,7 +119,7 @@ fn main() {
             }
         }
 
-        engine.update(&mut factory);
+        engine.update(&(), &mut factory);
         engine.draw(&mut encoder);
 
         encoder.flush(&mut device);
@@ -171,6 +171,8 @@ impl Hot {
 impl Engine<g::Res> for Hot {
     type CommandBuffer = g::Command;
     type Factory = g::Factory;
+    // connector::Driver holds the driver's state for us
+    type State = ();
 
     fn draw(&mut self, encoder: &mut g::Encoder) {
         encoder.clear(&self.main_color, BLACK);
@@ -185,7 +187,7 @@ impl Engine<g::Res> for Hot {
         }
     }
 
-    fn update(&mut self, factory: &mut g::Factory) {
+    fn update(&mut self, _: &(), factory: &mut g::Factory) {
 
         if let Ok((path, comms)) = self.update_rx.try_recv() {
             println!("Loading driver...");
