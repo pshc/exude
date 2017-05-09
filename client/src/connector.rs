@@ -60,19 +60,19 @@ impl Drop for Driver {
 }
 
 impl Driver {
-    pub fn draw(&self, ctx: g::GfxCtx, encoder: &mut g::Encoder) {
+    pub fn draw(&self, ctx: g::GfxRef, encoder: &mut g::Encoder) {
         self.renter.rent(|syms| (syms.1)(ctx, encoder))
     }
 
-    pub fn update(&self, ctx: g::GfxCtx) {
+    pub fn update(&self, ctx: g::GfxRefMut) {
         self.renter.rent(|syms| (syms.2)(ctx, self.handle))
     }
 
-    pub fn gfx_setup(&self, f: &mut g::Factory, v: g::RenderTargetView) -> Option<g::GfxCtx> {
+    pub fn gfx_setup(&self, f: &mut g::Factory, v: g::RenderTargetView) -> Option<g::GfxBox> {
         self.renter.rent(|syms| (syms.3)(self.handle, f, v))
     }
 
-    pub fn gfx_cleanup(&self, ctx: g::GfxCtx) {
+    pub fn gfx_cleanup(&self, ctx: g::GfxBox) {
         self.renter.rent(|syms| (syms.4)(ctx))
     }
 }

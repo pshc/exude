@@ -30,6 +30,7 @@ macro_rules! backend_items {
     ($backend:ident) => (
         use $backend;
         use core::nonzero::NonZero;
+        use std::marker::PhantomData;
         use gfx;
         use super::{ColorFormat, DepthFormat, DriverHandle};
 
@@ -41,25 +42,44 @@ macro_rules! backend_items {
         pub type RenderTargetView = gfx::handle::RenderTargetView<Res, ColorFormat>;
         pub type DepthStencilView = gfx::handle::DepthStencilView<Res, DepthFormat>;
 
-        pub type GlDrawFn = extern "C" fn(GfxCtx, &mut Encoder);
-        pub type GlUpdateFn = extern "C" fn(GfxCtx, DriverHandle);
-        pub type GlSetupFn = extern "C" fn(DriverHandle, &mut Factory, RenderTargetView) -> Option<GfxCtx>;
-        pub type GlCleanupFn = extern "C" fn(GfxCtx);
+        pub type GlDrawFn = extern "C" fn(GfxRef, &mut Encoder);
+        pub type GlUpdateFn = extern "C" fn(GfxRefMut, DriverHandle);
+        pub type GlSetupFn = extern "C" fn(DriverHandle, &mut Factory, RenderTargetView) -> Option<GfxBox>;
+        pub type GlCleanupFn = extern "C" fn(GfxBox);
 
         /// Opaque user pointer passed into gfx-related functions.
-        #[derive(Clone, Copy)]
-        pub struct GfxCtx(pub NonZero<*mut ()>);
-        unsafe impl Send for GfxCtx {}
+        pub struct GfxBox(NonZero<*mut ()>);
+        unsafe impl Send for GfxBox {}
 
-        impl GfxCtx {
+        impl GfxBox {
             pub unsafe fn new(ptr: *mut ()) -> Option<Self> {
                 if ptr.is_null() {
                     None
                 } else {
-                    Some(GfxCtx(NonZero::new(ptr)))
+                    Some(GfxBox(NonZero::new(ptr)))
                 }
             }
+
+            pub fn borrow<'a>(&'a self) -> GfxRef<'a> {
+                let ptr = unsafe { NonZero::new(*self.0 as *const ()) };
+                GfxRef(ptr, PhantomData)
+            }
+
+            pub fn borrow_mut<'a>(&'a mut self) -> GfxRefMut<'a> {
+                GfxRefMut(self.0 as NonZero<*mut ()>, PhantomData)
+            }
+
+            pub fn consume(self) -> *mut () {
+                *self.0
+            }
         }
+
+        /// Borrows GfxBox.
+        #[derive(Clone, Copy)]
+        pub struct GfxRef<'a>(pub NonZero<*const ()>, PhantomData<&'a ()>);
+
+        /// Borrows GfxBox mutably.
+        pub struct GfxRefMut<'a>(pub NonZero<*mut ()>, PhantomData<&'a mut ()>);
     )
 }
 

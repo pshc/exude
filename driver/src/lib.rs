@@ -16,7 +16,7 @@ use libc::c_void;
 
 use comms::{Pipe, Wrapper};
 use driver_abi::DriverCallbacks;
-use g::{DriverHandle, Encoder, GfxCtx, Res, gfx};
+use g::{DriverHandle, Encoder, Res, gfx};
 use g::gfx::traits::FactoryExt;
 use proto::api;
 
@@ -101,13 +101,13 @@ pub extern "C" fn gl_setup(
     handle: DriverHandle,
     factory: &mut g::Factory,
     rtv: g::RenderTargetView,
-) -> Option<GfxCtx> {
+) -> Option<g::GfxBox> {
 
     let state = unsafe { DriverState::<Wrapper>::borrow(handle) };
     match RenderImpl::<Res>::new(state.as_ref(), factory, rtv) {
         Ok(render) => {
             let ptr = Box::into_raw(box render) as *mut ();
-            unsafe { GfxCtx::new(ptr) }
+            unsafe { g::GfxBox::new(ptr) }
         }
         Err(e) => {
             let _ = writeln!(io::stderr(), "Driver setup: {}", e);
@@ -144,17 +144,15 @@ impl RenderImpl<g::Res> {
 }
 
 #[no_mangle]
-pub extern "C" fn gl_update(ctx: GfxCtx, handle: DriverHandle) {
+pub extern "C" fn gl_update(ctx: g::GfxRefMut, handle: DriverHandle) {
     let render: *mut RenderImpl<Res> = *ctx.0 as *mut RenderImpl<Res>;
-    // going to assume Box<T> is a pointer same as &mut T...
     let render: &mut RenderImpl<Res> = unsafe { &mut *render };
     render.update(handle);
 }
 
 #[no_mangle]
-pub extern "C" fn gl_draw(ctx: GfxCtx, encoder: &mut Encoder) {
-    let render = *ctx.0 as *mut RenderImpl<Res>;
-    // going to assume Box<T> is a pointer same as &T...
+pub extern "C" fn gl_draw(ctx: g::GfxRef, encoder: &mut Encoder) {
+    let render = *ctx.0 as *const RenderImpl<Res>;
     let render: &RenderImpl<Res> = unsafe { &*render };
     render.draw(encoder);
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -177,8 +175,8 @@ impl RenderImpl<Res> {
 }
 
 #[no_mangle]
-pub extern "C" fn gl_cleanup(ctx: GfxCtx) {
-    let render = unsafe { Box::from_raw(*ctx.0 as *mut RenderImpl<Res>) };
+pub extern "C" fn gl_cleanup(ctx: g::GfxBox) {
+    let render = unsafe { Box::from_raw(ctx.consume() as *mut RenderImpl<Res>) };
     drop(render);
     println!("cleaned up GL");
 }
