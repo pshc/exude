@@ -11,4 +11,6 @@ fn main() {
 
     println!("cargo:rustc-link-lib=g");
     println!("cargo:rustc-link-search={}", deps.display());
+
+    println!("cargo:rerun-if-changed=build.rs");
 }

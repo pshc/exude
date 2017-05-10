@@ -2,7 +2,6 @@
 
 #[macro_use]
 extern crate g;
-extern crate libc;
 extern crate proto;
 
 pub mod comms;
