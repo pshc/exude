@@ -2,18 +2,18 @@
 
 use libc::c_void;
 
-use g::DriverHandle;
+use g::DriverBox;
 
 pub type VersionFn = extern "C" fn() -> u32;
 
 /// The type of `setup` which is the first point of entry for the driver.
 /// Must be passed `Box::into_raw(Box::new(DriverCallbacks {..}))`.
 /// Returns an opaque pointer passed into subsequent driver calls.
-pub type SetupFn = extern "C" fn(*mut DriverCallbacks) -> DriverHandle;
+pub type SetupFn = extern "C" fn(*mut DriverCallbacks) -> Option<DriverBox>;
 
 /// The type of `teardown` which is the final call to the driver.
 /// Returns the boxed callback struct originally passed to `setup`.
-pub type TeardownFn = extern "C" fn(DriverHandle) -> *mut DriverCallbacks;
+pub type TeardownFn = extern "C" fn(DriverBox) -> *mut DriverCallbacks;
 
 /// Opaque context pointer provided by the loader.
 #[derive(Clone, Copy)]

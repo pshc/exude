@@ -13,15 +13,12 @@ pub extern crate gfx_window_glutin;
 pub extern crate gfx_window_metal;
 #[cfg(feature = "gl")]
 pub extern crate glutin;
-extern crate libc;
 pub extern crate winit;
 
 pub mod macros;
 
-/// Opaque user pointer passed into non-gfx-related functions.
-#[derive(Clone, Copy)]
-pub struct DriverHandle(pub *const libc::c_void);
-unsafe impl Send for DriverHandle {}
+use core::nonzero::NonZero;
+use std::marker::PhantomData;
 
 pub type ColorFormat = gfx::format::Rgba8;
 pub type DepthFormat = gfx::format::Depth;
@@ -32,7 +29,7 @@ macro_rules! backend_items {
         use core::nonzero::NonZero;
         use std::marker::PhantomData;
         use gfx;
-        use super::{ColorFormat, DepthFormat, DriverHandle};
+        use super::{ColorFormat, DepthFormat, DriverRef};
 
         pub type Command = $backend::CommandBuffer;
         pub type Factory = $backend::Factory;
@@ -43,8 +40,8 @@ macro_rules! backend_items {
         pub type DepthStencilView = gfx::handle::DepthStencilView<Res, DepthFormat>;
 
         pub type GlDrawFn = extern "C" fn(GfxRef, &mut Encoder);
-        pub type GlUpdateFn = extern "C" fn(GfxRefMut, DriverHandle, &mut Factory);
-        pub type GlSetupFn = extern "C" fn(DriverHandle, &mut Factory, RenderTargetView) -> Option<GfxBox>;
+        pub type GlUpdateFn = extern "C" fn(GfxRefMut, DriverRef, &mut Factory);
+        pub type GlSetupFn = extern "C" fn(DriverRef, &mut Factory, RenderTargetView) -> Option<GfxBox>;
         pub type GlCleanupFn = extern "C" fn(GfxBox);
 
         /// Opaque user pointer passed into gfx-related functions.
@@ -99,3 +96,31 @@ pub use metal::*;
 
 #[cfg(all(not(feature = "gl"), not(feature = "metal")))]
 panic!("please enable at least one backend (e.g. cargo build --features=gl)");
+
+
+/// Opaque user pointer passed into non-gfx-related functions.
+pub struct DriverBox(NonZero<*mut ()>);
+unsafe impl Send for DriverBox {}
+
+impl DriverBox {
+    pub unsafe fn new(ptr: *mut ()) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(DriverBox(NonZero::new(ptr)))
+        }
+    }
+
+    pub fn borrow<'a>(&'a self) -> DriverRef<'a> {
+        let ptr = unsafe { NonZero::new(*self.0 as *const ()) };
+        DriverRef(ptr, PhantomData)
+    }
+
+    pub fn consume(self) -> *mut () {
+        *self.0
+    }
+}
+
+/// Borrows DriverBox.
+#[derive(Clone, Copy)]
+pub struct DriverRef<'a>(pub NonZero<*const ()>, PhantomData<&'a ()>);

@@ -32,16 +32,16 @@ rental! {
 
 pub struct Driver {
     renter: rent_libloading::RentDriver,
-    handle: g::DriverHandle,
+    handle: Option<g::DriverBox>,
 }
 
 impl Driver {
     /// Must call this before dropping, or memory will be leaked.
     pub fn join(mut self) {
         let ref renter = self.renter;
-        let handle = mem::replace(&mut self.handle, g::DriverHandle(ptr::null_mut()));
-        assert!(!handle.0.is_null());
+        let handle = mem::replace(&mut self.handle, None).expect("join: null handle");
         let cb_ptr = renter.rent(|syms| (syms.0)(handle));
+        assert!(!cb_ptr.is_null());
         println!("Final driver teardown.");
         let mut callbacks: Box<DriverCallbacks> = unsafe { Box::from_raw(cb_ptr) };
         let comms = DriverComms::from_callbacks(&mut callbacks);
@@ -52,7 +52,7 @@ impl Driver {
 
 impl Drop for Driver {
     fn drop(&mut self) {
-        if !self.handle.0.is_null() {
+        if self.handle.is_some() {
             let _ = writeln!(io::stderr(), "WARNING: leaking driver state");
             debug_assert!(false, "must call Driver::join");
         }
@@ -65,11 +65,13 @@ impl Driver {
     }
 
     pub fn update(&self, ctx: g::GfxRefMut, factory: &mut g::Factory) {
-        self.renter.rent(|syms| (syms.2)(ctx, self.handle, factory))
+        let handle = self.handle.as_ref().expect("update: null handle");
+        self.renter.rent(|syms| (syms.2)(ctx, handle.borrow(), factory))
     }
 
     pub fn gfx_setup(&self, f: &mut g::Factory, v: g::RenderTargetView) -> Option<g::GfxBox> {
-        self.renter.rent(|syms| (syms.3)(self.handle, f, v))
+        let handle = self.handle.as_ref().expect("setup: null handle");
+        self.renter.rent(|syms| (syms.3)(handle.borrow(), f, v))
     }
 
     pub fn gfx_cleanup(&self, ctx: g::GfxBox) {
@@ -92,7 +94,7 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
 
         let cbs = Box::into_raw(box DriverComms::into_callbacks(comms));
         handle = setup(cbs);
-        if handle.0.is_null() {
+        if handle.is_none() {
             // error was dumped to stderr; shame we can't return it here...
             let err = io::Error::new(ErrorKind::Other, "could not setup driver");
             return Err(err);

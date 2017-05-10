@@ -10,14 +10,10 @@ mod driver_abi;
 
 use std::io::{self, ErrorKind, Write};
 use std::marker::PhantomData;
-use std::mem;
-use std::sync::Arc;
-
-use libc::c_void;
 
 use comms::{Pipe, Wrapper};
 use driver_abi::DriverCallbacks;
-use g::{DriverHandle, Encoder, Res, gfx};
+use g::{DriverBox, DriverRef, Encoder, Res, gfx};
 use g::gfx::traits::FactoryExt;
 use proto::api;
 
@@ -27,55 +23,41 @@ pub extern "C" fn version() -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn setup(cbs: *mut DriverCallbacks) -> DriverHandle {
+pub extern "C" fn setup(cbs: *mut DriverCallbacks) -> Option<DriverBox> {
     let pipe = Wrapper::new(cbs);
     let state = DriverState::new(pipe);
-    let ptr = match state {
-        Ok(arc) => Arc::into_raw(arc) as *const c_void,
+    match state {
+        Ok(state) => {
+            let ptr = Box::into_raw(box state) as *mut ();
+            unsafe { DriverBox::new(ptr) }
+        }
         Err(e) => {
             let _ = writeln!(io::stderr(), "Driver setup: {}", e);
-            std::ptr::null()
-        }
-    };
-    DriverHandle(ptr)
-}
-
-#[no_mangle]
-pub extern "C" fn teardown(handle: DriverHandle) -> *mut DriverCallbacks {
-    assert!(!handle.0.is_null());
-    let arc = unsafe { Arc::from_raw(handle.0 as *const DriverState<Wrapper>) };
-    match Arc::try_unwrap(arc) {
-        Ok(state) => {
-            let wrapper: Wrapper = state.shutdown();
-            wrapper.consume()
-        }
-        Err(_arc) => {
-            println!("teardown: DriverHandle still held somewhere!");
-            std::ptr::null_mut()
+            None
         }
     }
 }
 
-/// This is what we stash inside DriverHandle.
+#[no_mangle]
+pub extern "C" fn teardown(handle: DriverBox) -> *mut DriverCallbacks {
+    let boxed = unsafe { Box::from_raw(handle.consume() as *mut DriverState<Wrapper>) };
+    let wrapper: Wrapper = boxed.shutdown();
+    wrapper.consume()
+}
+
+/// This is what we stash inside DriverBox.
 pub struct DriverState<P> {
     pipe: P,
 }
 
 impl<P> DriverState<P> {
-    pub fn new(pipe: P) -> io::Result<Arc<Self>> {
+    pub fn new(pipe: P) -> io::Result<Self> {
         let state = DriverState { pipe };
-        Ok(Arc::new(state))
+        Ok(state)
     }
 
     pub fn shutdown(self) -> P {
         self.pipe
-    }
-
-    unsafe fn borrow(handle: DriverHandle) -> Arc<Self> {
-        let arc = Arc::from_raw(handle.0 as *const DriverState<P>);
-        let borrow = arc.clone();
-        mem::forget(arc);
-        borrow
     }
 }
 
@@ -99,13 +81,14 @@ const TRIANGLE: [Vertex; 3] = [
 
 #[no_mangle]
 pub extern "C" fn gl_setup(
-    handle: DriverHandle,
+    state_ref: DriverRef,
     factory: &mut g::Factory,
     rtv: g::RenderTargetView,
 ) -> Option<g::GfxBox> {
 
-    let state = unsafe { DriverState::<Wrapper>::borrow(handle) };
-    match RenderImpl::<Res, Wrapper>::new(state.as_ref(), factory, rtv) {
+    let state: *const DriverState<Wrapper> = *state_ref.0 as *const DriverState<Wrapper>;
+    let state: &DriverState<Wrapper> = unsafe { &*state };
+    match RenderImpl::<Res, Wrapper>::new(state, factory, rtv) {
         Ok(render) => {
             let ptr = Box::into_raw(box render) as *mut ();
             unsafe { g::GfxBox::new(ptr) }
@@ -146,10 +129,12 @@ impl<P: Pipe> RenderImpl<Res, P> {
 }
 
 #[no_mangle]
-pub extern "C" fn gl_update(ctx: g::GfxRefMut, handle: DriverHandle, factory: &mut g::Factory) {
+pub extern "C" fn gl_update(ctx: g::GfxRefMut, state_ref: DriverRef, factory: &mut g::Factory) {
     let render = *ctx.0 as *mut RenderImpl<Res, Wrapper>;
     let render: &mut RenderImpl<Res, Wrapper> = unsafe { &mut *render };
-    render.update(handle, factory);
+    let state_ptr = *state_ref.0 as *const DriverState<Wrapper>;
+    let state = unsafe { &*state_ptr };
+    render.update(state, factory);
 }
 
 #[no_mangle]
@@ -157,16 +142,15 @@ pub extern "C" fn gl_draw(ctx: g::GfxRef, encoder: &mut Encoder) {
     let render = *ctx.0 as *const RenderImpl<Res, Wrapper>;
     let render: &RenderImpl<Res, Wrapper> = unsafe { &*render };
     render.draw(encoder);
-    std::thread::sleep(std::time::Duration::from_millis(10));
 }
 
 impl<P: Pipe> RenderImpl<Res, P> {
     pub fn draw(&self, mut encoder: &mut Encoder) {
-        encoder.draw(&self.slice, &self.pso, &self.data)
+        encoder.draw(&self.slice, &self.pso, &self.data);
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    pub fn update(&mut self, handle: DriverHandle, factory: &mut g::Factory) {
-        let state = unsafe { DriverState::<Wrapper>::borrow(handle) };
+    pub fn update(&mut self, state: &DriverState<P>, factory: &mut g::Factory) {
 
         while let Some(msg) = state.pipe.try_recv::<api::DownResponse>().unwrap() {
             println!("=== {:?} ===", msg);
