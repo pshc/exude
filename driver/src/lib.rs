@@ -9,6 +9,7 @@ pub mod comms;
 mod driver_abi;
 
 use std::io::{self, ErrorKind, Write};
+use std::marker::PhantomData;
 use std::mem;
 use std::sync::Arc;
 
@@ -104,7 +105,7 @@ pub extern "C" fn gl_setup(
 ) -> Option<g::GfxBox> {
 
     let state = unsafe { DriverState::<Wrapper>::borrow(handle) };
-    match RenderImpl::<Res>::new(state.as_ref(), factory, rtv) {
+    match RenderImpl::<Res, Wrapper>::new(state.as_ref(), factory, rtv) {
         Ok(render) => {
             let ptr = Box::into_raw(box render) as *mut ();
             unsafe { g::GfxBox::new(ptr) }
@@ -116,15 +117,16 @@ pub extern "C" fn gl_setup(
     }
 }
 
-pub struct RenderImpl<R: gfx::Resources> {
+pub struct RenderImpl<R: gfx::Resources, P> {
     slice: gfx::Slice<R>,
     pso: gfx::PipelineState<R, pipe::Meta>,
     data: pipe::Data<R>,
+    _phantom: PhantomData<P>,
 }
 
-impl RenderImpl<g::Res> {
+impl<P: Pipe> RenderImpl<Res, P> {
     pub fn new(
-        _: &DriverState<Wrapper>,
+        _: &DriverState<P>,
         factory: &mut g::Factory,
         rtv: g::RenderTargetView,
     ) -> io::Result<Self> {
@@ -139,26 +141,26 @@ impl RenderImpl<g::Res> {
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&TRIANGLE, ());
         let data = pipe::Data { vbuf: vertex_buffer, out: rtv };
 
-        Ok(RenderImpl { slice, pso, data })
+        Ok(RenderImpl { slice, pso, data, _phantom: PhantomData })
     }
 }
 
 #[no_mangle]
 pub extern "C" fn gl_update(ctx: g::GfxRefMut, handle: DriverHandle, factory: &mut g::Factory) {
-    let render: *mut RenderImpl<Res> = *ctx.0 as *mut RenderImpl<Res>;
-    let render: &mut RenderImpl<Res> = unsafe { &mut *render };
+    let render = *ctx.0 as *mut RenderImpl<Res, Wrapper>;
+    let render: &mut RenderImpl<Res, Wrapper> = unsafe { &mut *render };
     render.update(handle, factory);
 }
 
 #[no_mangle]
 pub extern "C" fn gl_draw(ctx: g::GfxRef, encoder: &mut Encoder) {
-    let render = *ctx.0 as *const RenderImpl<Res>;
-    let render: &RenderImpl<Res> = unsafe { &*render };
+    let render = *ctx.0 as *const RenderImpl<Res, Wrapper>;
+    let render: &RenderImpl<Res, Wrapper> = unsafe { &*render };
     render.draw(encoder);
     std::thread::sleep(std::time::Duration::from_millis(10));
 }
 
-impl RenderImpl<Res> {
+impl<P: Pipe> RenderImpl<Res, P> {
     pub fn draw(&self, mut encoder: &mut Encoder) {
         encoder.draw(&self.slice, &self.pso, &self.data)
     }
@@ -177,7 +179,7 @@ impl RenderImpl<Res> {
 
 #[no_mangle]
 pub extern "C" fn gl_cleanup(ctx: g::GfxBox) {
-    let render = unsafe { Box::from_raw(ctx.consume() as *mut RenderImpl<Res>) };
+    let render = unsafe { Box::from_raw(ctx.consume() as *mut RenderImpl<Res, Wrapper>) };
     drop(render);
     println!("cleaned up GL");
 }
