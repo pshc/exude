@@ -46,7 +46,6 @@ macro_rules! backend_items {
 
         /// Opaque user pointer passed into gfx-related functions.
         pub struct GfxBox(NonZero<*mut ()>);
-        unsafe impl Send for GfxBox {}
 
         impl GfxBox {
             pub unsafe fn new(ptr: *mut ()) -> Option<Self> {
@@ -100,7 +99,6 @@ panic!("please enable at least one backend (e.g. cargo build --features=gl)");
 
 /// Opaque user pointer passed into non-gfx-related functions.
 pub struct DriverBox(NonZero<*mut ()>);
-unsafe impl Send for DriverBox {}
 
 impl DriverBox {
     pub unsafe fn new(ptr: *mut ()) -> Option<Self> {

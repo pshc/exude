@@ -16,7 +16,6 @@ pub type TeardownFn = extern "C" fn(DriverBox) -> *mut DriverCallbacks;
 /// Opaque context pointer provided by the loader.
 #[derive(Clone, Copy)]
 pub struct CallbackCtx(pub *mut ());
-unsafe impl Send for CallbackCtx {}
 
 /// For transmitting messages between driver and client core.
 /// Uses C ABI in an attempt at interface stability.

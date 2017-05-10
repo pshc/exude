@@ -15,7 +15,6 @@ pub trait Pipe {
 
 /// Safe high-level wrapper for DriverCallbacks.
 pub struct Wrapper(*mut DriverCallbacks);
-unsafe impl Send for Wrapper {}
 
 impl Wrapper {
     pub fn new(cbs: *mut DriverCallbacks) -> Self {
