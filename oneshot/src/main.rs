@@ -14,7 +14,6 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
 use futures::Future;
-use g::DriverHandle;
 use g::gfx::Device;
 use g::gfx_text;
 use g::gfx_window_glutin;
@@ -26,6 +25,7 @@ use tokio_io::AsyncRead;
 use client::net;
 use client::common::{self, IoFuture};
 use client::render_loop::{self, Engine};
+use driver::{DriverState, RenderImpl};
 use proto::{Bincoded, Digest, handshake};
 use proto::bincoded;
 use proto::serde::{Deserialize, Serialize};
@@ -84,7 +84,7 @@ fn main() {
         },
     );
 
-    let handle = driver::setup(&io_comms);
+    let state: DriverState<StaticComms> = DriverState::new(io_comms).unwrap();
 
     let builder = glutin::WindowBuilder::new()
         .with_title("Standalone".to_string())
@@ -93,7 +93,7 @@ fn main() {
     let (window, mut device, mut factory, main_color, main_depth) =
         gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(builder);
 
-    let mut engine = Oneshot::new(&mut factory, main_color, main_depth).unwrap();
+    let mut engine = Oneshot::new(&state, &mut factory, main_color, main_depth).unwrap();
 
     let mut encoder = factory.create_command_buffer().into();
 
@@ -111,7 +111,7 @@ fn main() {
             }
         }
 
-        engine.update(&mut factory);
+        engine.update(&state, &mut factory);
         engine.draw(&mut encoder);
 
         encoder.flush(&mut device);
@@ -119,8 +119,8 @@ fn main() {
         device.cleanup();
     }
 
-    let handle = engine.cleanup();
-    let callbacks = driver::teardown(handle);
+    drop(engine);
+    let _: StaticComms = state.shutdown();
 }
 
 struct StaticComms {
@@ -160,8 +160,7 @@ impl driver::comms::Pipe for StaticComms {
 
 /// Our statically linked Engine.
 struct Oneshot {
-    ctx: Box<g::GfxCtx>,
-    handle: DriverHandle,
+    render: RenderImpl<g::Res, StaticComms>,
     main_color: g::RenderTargetView,
     main_depth: g::DepthStencilView,
     text: gfx_text::Renderer<g::Res, g::Factory>,
@@ -169,13 +168,13 @@ struct Oneshot {
 
 impl Oneshot {
     fn new(
-        handle: DriverHandle,
+        state: &DriverState<StaticComms>,
         factory: &mut g::Factory,
         rtv: g::RenderTargetView,
         dsv: g::DepthStencilView,
     ) -> io::Result<Self> {
 
-        let ctx = driver::gl_setup(handle, factory, rtv.clone())?;
+        let render = RenderImpl::new(state, factory, rtv.clone())?;
 
         let text = gfx_text::new(factory.clone())
             .with_size(30)
@@ -183,29 +182,27 @@ impl Oneshot {
             .unwrap(); // xxx
         Ok(
             Oneshot {
-                ctx,
-                handle,
+                render,
                 main_color: rtv,
                 main_depth: dsv,
                 text,
             },
         )
     }
-
-    fn cleanup(self) -> DriverHandle {
-        driver::gl_cleanup(self.handle, self.ctx);
-    }
 }
 
 impl Engine<g::Res> for Oneshot {
     type CommandBuffer = g::Command;
     type Factory = g::Factory;
+    type State = DriverState<StaticComms>;
 
     fn draw(&mut self, encoder: &mut g::Encoder) {
         encoder.clear(&self.main_color, BLACK);
-        driver::gl_draw(&*self.ctx, encoder);
+        self.render.draw(encoder);
         self.text.add("Oneshot", [10, 10], WHITE);
     }
 
-    fn update(&mut self, _: &mut g::Factory) {}
+    fn update(&mut self, state: &DriverState<StaticComms>, factory: &mut g::Factory) {
+        self.render.update(state, factory);
+    }
 }
