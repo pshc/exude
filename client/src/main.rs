@@ -5,7 +5,6 @@ extern crate futures;
 extern crate futures_cpupool;
 #[macro_use]
 extern crate g;
-extern crate libc;
 extern crate libloading;
 extern crate proto;
 #[macro_use]

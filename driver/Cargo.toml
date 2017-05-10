@@ -3,9 +3,6 @@ authors = ["Paul Collier <paul@paulcollier.ca>"]
 name = "driver"
 version = "0.1.0"
 
-[dependencies]
-libc = "0.2"
-
 [dependencies.g]
 optional = true
 path = "../g"

@@ -1,7 +1,5 @@
 //! Shared interface between the loader and driver.
 
-use libc::c_void;
-
 use g::DriverBox;
 
 pub type VersionFn = extern "C" fn() -> u32;
@@ -17,7 +15,7 @@ pub type TeardownFn = extern "C" fn(DriverBox) -> *mut DriverCallbacks;
 
 /// Opaque context pointer provided by the loader.
 #[derive(Clone, Copy)]
-pub struct CallbackCtx(pub *mut c_void);
+pub struct CallbackCtx(pub *mut ());
 unsafe impl Send for CallbackCtx {}
 
 /// For transmitting messages between driver and client core.

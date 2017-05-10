@@ -6,7 +6,6 @@ use std::ptr;
 use std::sync::mpsc;
 
 use futures;
-use libc::c_void;
 use libloading::{Library, Symbol};
 
 use driver_abi::{self, CallbackCtx, DriverCallbacks};
@@ -124,7 +123,7 @@ pub struct DriverComms {
 impl DriverComms {
     pub fn into_callbacks(comms: Box<DriverComms>) -> DriverCallbacks {
         DriverCallbacks {
-            ctx: CallbackCtx(Box::into_raw(comms) as *mut c_void),
+            ctx: CallbackCtx(Box::into_raw(comms) as *mut ()),
             send_fn: driver_send,
             try_recv_fn: driver_try_recv,
         }
