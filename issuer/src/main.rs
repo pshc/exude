@@ -1,11 +1,15 @@
+#![recursion_limit = "1024"]
+
 extern crate digest;
+#[macro_use]
+extern crate error_chain;
 extern crate proto;
 extern crate rpassword;
 extern crate sha3;
 extern crate sodiumoxide;
 
 use std::env;
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{self, Read, Write};
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::process;
@@ -15,6 +19,11 @@ use sodiumoxide::crypto::{pwhash, secretbox, sign};
 
 use proto::{Bincoded, Digest, DriverInfo, Signature};
 
+mod errors {
+    error_chain!{}
+}
+use errors::*;
+
 fn main() {
     assert!(sodiumoxide::init());
 
@@ -22,13 +31,22 @@ fn main() {
     if args.len() < 2 {
         usage();
     }
-    if let Err(e) = dispatch(&args[1..]) {
-        writeln!(io::stderr(), "Error: {}", e).unwrap();
-        process::exit(1)
+
+    if let Err(ref e) = dispatch(&args[1..]) {
+        let stderr = &mut io::stderr();
+        let errmsg = "Error writing to stderr";
+
+        writeln!(stderr, "error: {}", e).expect(errmsg);
+
+        for e in e.iter().skip(1) {
+            writeln!(stderr, "caused by: {}", e).expect(errmsg);
+        }
+
+        process::exit(1);
     }
 }
 
-fn dispatch(args: &[String]) -> io::Result<()> {
+fn dispatch(args: &[String]) -> Result<()> {
     match &*args[0] {
         "keygen" => keygen(),
         "sign" => sign(),
@@ -52,39 +70,33 @@ fn usage() -> ! {
 const OPS: pwhash::OpsLimit = pwhash::OPSLIMIT_SENSITIVE;
 const MEM: pwhash::MemLimit = pwhash::MEMLIMIT_SENSITIVE;
 
-fn keygen() -> io::Result<()> {
-    let dir = cred_path();
+fn keygen() -> Result<()> {
+    let dir = cred_path()?;
     println!("Keys will be written into: {}", dir.to_string_lossy());
 
     let password;
     {
-        print!("Please choose an encryption passphrase: ");
-        io::stdout().flush()?;
-        password = rpassword::read_password()?;
-        print!("Please repeat it: ");
-        io::stdout().flush()?;
-        let again = rpassword::read_password()?;
-        if password != again {
-            let err = io::Error::new(ErrorKind::InvalidInput, "passwords did not match");
-            return Err(err);
-        }
+        password = prompt_password("Please choose an encryption passphrase: ")?;
+        let again = prompt_password("Please repeat it: ")?;
+        ensure!(password == again, "passwords did not match");
     }
 
     let mut pub_file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(dir.join("public"))?;
+        .open(dir.join("public"))
+        .chain_err(|| "unable to create new public key")?;
     let mut priv_file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(dir.join("secret"))?;
+        .open(dir.join("secret"))
+        .chain_err(|| "unable to create new secret key")?;
 
     println!("Deriving encryption key...");
     let salt = pwhash::gen_salt();
     let mut box_key = secretbox::Key([0; secretbox::KEYBYTES]);
     if Err(()) == pwhash::derive_key(&mut box_key.0, password.as_bytes(), &salt, OPS, MEM) {
-        let err = io::Error::new(ErrorKind::Other, "not enough resources for pwhash");
-        return Err(err);
+        bail!("not enough resources for pwhash");
     }
 
     println!("Generating and encrypting key pair...");
@@ -95,32 +107,42 @@ fn keygen() -> io::Result<()> {
     let ciphertext = secretbox::seal(&secret_key.0, &nonce, &box_key);
     drop(secret_key);
 
-    pub_file.write_all(&public_key.0)?;
-    pub_file.sync_all()?;
+    pub_file.write_all(&public_key.0)
+        .and_then(|()| pub_file.sync_all())
+        .chain_err(|| "couldn't write public key")?;
     drop(pub_file);
 
-    priv_file.write_all(&nonce.0)?;
-    priv_file.write_all(&salt.0)?;
-    priv_file.write_all(&ciphertext)?;
-    priv_file.sync_all()?;
+    Ok(())
+        .and_then(|()| {
+            priv_file.write_all(&nonce.0)?;
+            priv_file.write_all(&salt.0)?;
+            priv_file.write_all(&ciphertext)?;
+            priv_file.sync_all()
+        })
+        .chain_err(|| "couldn't write private key")?;
+
     drop(priv_file);
 
     println!("Keys written to disk.");
     Ok(())
 }
 
-fn load_keys() -> io::Result<(sign::PublicKey, sign::SecretKey)> {
-    let dir = cred_path();
+fn load_keys() -> Result<(sign::PublicKey, sign::SecretKey)> {
+    let dir = cred_path()?;
     println!("Keys will be read from: {}", dir.to_string_lossy());
 
     let public_key;
     {
         let mut pub_bytes = [0; sign::PUBLICKEYBYTES];
-        let mut pub_file = File::open(dir.join("public"))?;
-        pub_file.read_exact(&mut pub_bytes)?;
-        if pub_file.read(&mut [0u8])? > 0 {
-            return Err(io::Error::new(ErrorKind::InvalidData, "public key too long"),);
-        }
+        let eof = File::open(dir.join("public"))
+            .and_then(
+                |mut f| {
+                    f.read_exact(&mut pub_bytes)?;
+                    Ok(f.read(&mut [0u8])? == 0)
+                },
+            )
+            .chain_err(|| "couldn't load public key")?;
+        ensure!(eof, "public key too long");
         public_key = sign::PublicKey(pub_bytes);
     }
 
@@ -128,36 +150,37 @@ fn load_keys() -> io::Result<(sign::PublicKey, sign::SecretKey)> {
     let salt;
     let mut ciphertext = Vec::new();
     {
-        let mut priv_file = File::open(dir.join("secret"))?;
         let mut nonce_bytes = [0; secretbox::NONCEBYTES];
         let mut salt_bytes = [0; pwhash::SALTBYTES];
-        priv_file.read_exact(&mut nonce_bytes)?;
-        priv_file.read_exact(&mut salt_bytes)?;
-        priv_file.read_to_end(&mut ciphertext)?;
+        File::open(dir.join("secret"))
+            .and_then(
+                |mut f| {
+                    f.read_exact(&mut nonce_bytes)?;
+                    f.read_exact(&mut salt_bytes)?;
+                    f.read_to_end(&mut ciphertext)
+                },
+            )
+            .chain_err(|| "couldn't load private key")?;
         nonce = secretbox::Nonce(nonce_bytes);
         salt = pwhash::Salt(salt_bytes);
     }
 
-    print!("Passphrase: ");
-    io::stdout().flush()?;
-    let password = rpassword::read_password()?;
+    let password = prompt_password("Passphrase: ")?;
 
     println!("Deriving encryption key...");
     let mut box_key = secretbox::Key([0; secretbox::KEYBYTES]);
     if Err(()) == pwhash::derive_key(&mut box_key.0, password.as_bytes(), &salt, OPS, MEM) {
-        let err = io::Error::new(ErrorKind::Other, "not enough resources for pwhash");
-        return Err(err);
+        bail!("not enough resources for pwhash");
     }
 
     println!("Decrypting secret key...");
     let secret_key;
     {
         let mut plaintext = secretbox::open(&ciphertext, &nonce, &box_key)
-            .map_err(|()| io::Error::new(ErrorKind::InvalidInput, "invalid box key"))?;
+            .map_err(|()| ErrorKind::Msg("invalid box key".into()))?;
 
         if plaintext.len() != sign::SECRETKEYBYTES {
-            let err = io::Error::new(ErrorKind::InvalidData, "bad secret key length");
-            return Err(err);
+            bail!("bad secret key length ({})", plaintext.len());
         }
         let mut secret_bytes = [0; sign::SECRETKEYBYTES];
         secret_bytes.copy_from_slice(&plaintext);
@@ -171,19 +194,16 @@ fn load_keys() -> io::Result<(sign::PublicKey, sign::SecretKey)> {
     Ok((public_key, secret_key))
 }
 
-fn verify_keys(pk: &sign::PublicKey, sk: &sign::SecretKey) -> io::Result<()> {
+fn verify_keys(pk: &sign::PublicKey, sk: &sign::SecretKey) -> Result<()> {
     let mut random = [0; 64];
     sodiumoxide::randombytes::randombytes_into(&mut random);
     let sig = sign::sign_detached(&random, &sk);
-    if sign::verify_detached(&sig, &random, &pk) {
-        Ok(())
-    } else {
-        let err = io::Error::new(ErrorKind::InvalidData, "could not verify keys");
-        Err(err)
-    }
+    let verified = sign::verify_detached(&sig, &random, &pk);
+    ensure!(verified, "could not verify keys");
+    Ok(())
 }
 
-fn sign() -> io::Result<()> {
+fn sign() -> Result<()> {
     let mut root_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     root_path.pop();
     let root_path = root_path;
@@ -194,9 +214,11 @@ fn sign() -> io::Result<()> {
     driver_path.push("libdriver.dylib"); // xxx
     let driver_path = driver_path;
 
-    println!("Reading driver: {}", driver_path.to_string_lossy());
+    println!("Reading driver: {}", driver_path.display());
     let mut driver_bytes = Vec::new();
-    File::open(driver_path)?.read_to_end(&mut driver_bytes)?;
+    File::open(driver_path)
+        .and_then(|mut f| f.read_to_end(&mut driver_bytes))
+        .chain_err(|| "could not read driver binary")?;
     let len = driver_bytes.len();
 
     println!("Hashing driver...");
@@ -214,22 +236,31 @@ fn sign() -> io::Result<()> {
     // Expiry dates? Revocation?
     {
         let descriptor = DriverInfo { len: len, digest: digest, sig: sig };
-        let bincoded = Bincoded::new(&descriptor)?;
+        let bincoded = Bincoded::new(&descriptor)
+            .chain_err(|| "driver metadata encoding issue")?;
 
-        let mut descriptor_path = root_path.clone();
-        descriptor_path.push("latest.meta");
-        let mut file = File::create(descriptor_path)?;
-        file.write_all(bincoded.as_ref())?;
-        file.sync_all()?;
+        let descriptor_path = root_path.join("latest.meta");
+        File::create(descriptor_path)
+            .and_then(
+                |mut file| {
+                    file.write_all(bincoded.as_ref())?;
+                    file.sync_all()
+                },
+            )
+            .chain_err(|| "couldn't write metadata")?;
     }
 
     // temp: write a copy conveniently
     {
-        let mut dest_path = root_path;
-        dest_path.push("latest.bin");
-        let mut dest = File::create(dest_path)?;
-        dest.write_all(&driver_bytes)?;
-        dest.sync_all()?;
+        let dest_path = root_path.join("latest.bin");
+        File::create(dest_path)
+            .and_then(
+                |mut dest| {
+                    dest.write_all(&driver_bytes)?;
+                    dest.sync_all()
+                },
+            )
+            .chain_err(|| "couldn't copy driver")?;
     }
 
     println!("Wrote signature.");
@@ -247,22 +278,28 @@ fn digest_from_bytes(bytes: &[u8]) -> Digest {
     Digest(result)
 }
 
-fn cred_path() -> PathBuf {
+fn prompt_password(prompt: &str) -> Result<String> {
+    print!("{}", prompt);
+    io::stdout().flush().chain_err(|| "can't even")?;
+    rpassword::read_password().chain_err(|| "can't hide password input")
+}
+
+fn cred_path() -> Result<PathBuf> {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("cred");
 
     match fs::create_dir(&path) {
         Ok(()) => (),
         Err(ref e) if e.kind() == io::ErrorKind::AlreadyExists => (),
-        Err(e) => panic!("couldn't create {:?}: {}", path, e),
+        Err(e) => Err(e).chain_err(|| "couldn't create cred dir")?,
     }
 
-    path
+    Ok(path)
 }
 
 #[test]
 fn test_cred_path() {
-    let path = cred_path();
+    let path = cred_path().unwrap();
     assert!(path.ends_with("cred"));
     assert!(path.parent().unwrap().exists());
 }
