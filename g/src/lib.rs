@@ -1,6 +1,13 @@
-#![feature(nonzero)]
+#![feature(macro_reexport, nonzero)]
 
 extern crate core;
+#[macro_reexport(
+    gfx_defines, gfx_format,
+    gfx_pipeline, gfx_pipeline_base, gfx_pipeline_inner,
+    gfx_impl_struct, gfx_impl_struct_meta,
+    gfx_vertex_struct, gfx_vertex_struct_meta,
+    gfx_constant_struct, gfx_constant_struct_meta,
+)]
 pub extern crate gfx;
 #[cfg(feature = "gl")]
 pub extern crate gfx_device_gl;
@@ -14,8 +21,6 @@ pub extern crate gfx_window_metal;
 #[cfg(feature = "gl")]
 pub extern crate glutin;
 pub extern crate winit;
-
-pub mod macros;
 
 use core::nonzero::NonZero;
 use std::marker::PhantomData;
