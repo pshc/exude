@@ -2,13 +2,14 @@
 
 extern crate client;
 extern crate driver;
+#[macro_use]
+extern crate error_chain;
 extern crate futures;
 extern crate g;
 extern crate proto;
 extern crate tokio_core;
 extern crate tokio_io;
 
-use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
@@ -23,12 +24,27 @@ use tokio_core::reactor::Core;
 use tokio_io::AsyncRead;
 
 use client::net;
-use client::common::{self, IoFuture};
+use client::common::{self, OurFuture};
 use client::render_loop::{self, Engine};
 use driver::{DriverState, RenderImpl};
 use proto::{Bincoded, Digest, handshake};
 use proto::bincoded;
 use proto::serde::{Deserialize, Serialize};
+
+mod errors {
+    error_chain! {
+        errors {
+            /// Wrapped since `gfx_text::Error` doesn't impl Error
+            Text(t: ::g::gfx_text::Error) {
+            }
+        }
+        links {
+            Client(::client::Error, ::client::ErrorKind);
+            Driver(::driver::Error, ::driver::ErrorKind);
+        }
+    }
+}
+use errors::*;
 
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
@@ -50,41 +66,50 @@ fn main() {
             let mut core = Core::new().unwrap();
             let handle = core.handle();
 
-            let client = TcpStream::connect(&addr, &handle).and_then(
-                |sock| {
+            let client = TcpStream::connect(&addr, &handle)
+                .then(|res| {
+                    client::ResultExt::chain_err(res, || format!("couldn't connect to {}", addr))
+                })
+                .and_then(
+                |sock| -> OurFuture<_> {
                     let (reader, writer) = sock.split();
 
                     let greeting = {
                         // TEMP we should have like `handshake::Hello::RequireVersion` to indicate our intent?
                         let cached_driver = Some(Digest::zero()); // TEMP
                         let hello = handshake::Hello(cached_driver);
-                        common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
+                        common::write_bincoded(writer, &hello)
+                            .and_then(|(w, _)| Ok(w))
                     };
 
-                    let welcome = common::read_bincoded(reader).and_then(
+                    let welcome = common::read_bincoded(reader)
+                        .and_then(
                         |(reader, welcome)| {
                             match welcome {
                                 handshake::Welcome::Current => Ok(reader),
-                                _ => Err(io::Error::new(ErrorKind::Other, "client too outdated for server")),
+                                _ => bail!("client too outdated for server"),
                             }
                         }
                     );
 
-                    welcome
+                    box welcome
                         .join(greeting)
                         .and_then(
-                            move |(r, w)| -> IoFuture<_> {
-                                box net_comms.handle(r, w).map(|_| println!("net: donezo"))
+                            move |(r, w)| -> OurFuture<_> {
+                                box net_comms.handle(r, w)
                             },
                         )
                 },
             );
 
-            core.run(client).unwrap();
+            match core.run(client) {
+                Ok((_r, _w)) => println!("net: donezo"),
+                Err(e) => client::errors::display_net_thread_error(e).expect("net: stderr?"),
+            }
         },
     );
 
-    let state: DriverState<StaticComms> = DriverState::new(io_comms).unwrap();
+    let state: DriverState<StaticComms> = DriverState::new(io_comms);
 
     let builder = glutin::WindowBuilder::new()
         .with_title("Standalone".to_string())
@@ -129,18 +154,17 @@ struct StaticComms {
 }
 
 impl driver::comms::Pipe for StaticComms {
-    fn send<T: Serialize>(&self, msg: &T) -> io::Result<()> {
+    fn send<T: Serialize>(&self, msg: &T) -> driver::Result<()> {
         // so many copies... ugh!
         let bin = Bincoded::new(msg)?;
         // todo we should go directly to Box<[u8]>
         let vec: Vec<u8> = bin.into();
         assert!(vec.len() <= ::std::i32::MAX as usize);
-        self.tx
-            .send(vec.into_boxed_slice())
-            .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "send: pipe broken"),)
+        let res = self.tx.send(vec.into_boxed_slice());
+        driver::ResultExt::chain_err(res, || format!("couldn't send message"))
     }
 
-    fn try_recv<T>(&self) -> io::Result<Option<T>>
+    fn try_recv<T>(&self) -> driver::Result<Option<T>>
     where
         for<'de> T: Deserialize<'de>,
     {
@@ -150,10 +174,7 @@ impl driver::comms::Pipe for StaticComms {
                 Ok(Some(val))
             }
             Err(TryRecvError::Empty) => Ok(None),
-            Err(TryRecvError::Disconnected) => {
-                let err = io::Error::new(ErrorKind::BrokenPipe, "try_recv: pipe broken");
-                Err(err)
-            }
+            Err(TryRecvError::Disconnected) => Err(driver::ErrorKind::BrokenComms.into()),
         }
     }
 }
@@ -172,14 +193,14 @@ impl Oneshot {
         factory: &mut g::Factory,
         rtv: g::RenderTargetView,
         dsv: g::DepthStencilView,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
 
         let render = RenderImpl::new(state, factory, rtv.clone())?;
 
         let text = gfx_text::new(factory.clone())
             .with_size(30)
             .build()
-            .unwrap(); // xxx
+            .map_err(ErrorKind::Text)?;
         Ok(
             Oneshot {
                 render,

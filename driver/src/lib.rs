@@ -1,17 +1,22 @@
 #![feature(box_syntax)]
+#![recursion_limit = "1024"]
 
+#[macro_use]
+extern crate error_chain;
 #[macro_use]
 extern crate g;
 extern crate proto;
 
 pub mod comms;
+pub mod errors;
 mod driver_abi;
 
-use std::io::{self, ErrorKind, Write};
+use std::io::{self, Write};
 use std::marker::PhantomData;
 
 use comms::{Pipe, Wrapper};
 use driver_abi::DriverCallbacks;
+pub use errors::*;
 use g::{DriverBox, DriverRef, Encoder, Res, gfx};
 use g::gfx::traits::FactoryExt;
 use proto::api;
@@ -25,16 +30,8 @@ pub extern "C" fn version() -> u32 {
 pub extern "C" fn setup(cbs: *mut DriverCallbacks) -> Option<DriverBox> {
     let pipe = Wrapper::new(cbs);
     let state = DriverState::new(pipe);
-    match state {
-        Ok(state) => {
-            let ptr = Box::into_raw(box state) as *mut ();
-            unsafe { DriverBox::new(ptr) }
-        }
-        Err(e) => {
-            let _ = writeln!(io::stderr(), "Driver setup: {}", e);
-            None
-        }
-    }
+    let ptr = Box::into_raw(box state) as *mut ();
+    unsafe { DriverBox::new(ptr) }
 }
 
 #[no_mangle]
@@ -50,9 +47,9 @@ pub struct DriverState<P> {
 }
 
 impl<P> DriverState<P> {
-    pub fn new(pipe: P) -> io::Result<Self> {
+    pub fn new(pipe: P) -> Self {
         let state = DriverState { pipe };
-        Ok(state)
+        state
     }
 
     pub fn shutdown(self) -> P {
@@ -60,17 +57,23 @@ impl<P> DriverState<P> {
     }
 }
 
-gfx_defines! {
-    vertex Vertex {
-        pos: [f32; 2] = "a_Pos",
-        color: [f32; 3] = "a_Color",
-    }
+mod simple {
+    use g;
+    use gfx;
 
-    pipeline pipe {
-        vbuf: gfx::VertexBuffer<Vertex> = (),
-        out: gfx::RenderTarget<g::ColorFormat> = "Target0",
+    gfx_defines! {
+        vertex Vertex {
+            pos: [f32; 2] = "a_Pos",
+            color: [f32; 3] = "a_Color",
+        }
+
+        pipeline pipe {
+            vbuf: gfx::VertexBuffer<Vertex> = (),
+            out: gfx::RenderTarget<g::ColorFormat> = "Target0",
+        }
     }
 }
+use simple::{Vertex, pipe};
 
 const TRIANGLE: [Vertex; 3] = [
     Vertex { pos: [-0.5, -0.5], color: [1.0, 0.0, 0.0] },
@@ -103,6 +106,9 @@ pub struct RenderImpl<R: gfx::Resources, P> {
     slice: gfx::Slice<R>,
     pso: gfx::PipelineState<R, pipe::Meta>,
     data: pipe::Data<R>,
+
+    // TODO move this to DriverState
+    broken_comms: bool,
     _phantom: PhantomData<P>,
 }
 
@@ -111,19 +117,27 @@ impl<P: Pipe> RenderImpl<Res, P> {
         _: &DriverState<P>,
         factory: &mut g::Factory,
         rtv: g::RenderTargetView,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         let pso = factory
             .create_pipeline_simple(
                 include_bytes!("shader/triangle_150.glslv"),
                 include_bytes!("shader/triangle_150.glslf"),
                 pipe::new(),
             )
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+            .chain_err(|| "couldn't set up gfx pipeline")?;
 
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&TRIANGLE, ());
         let data = pipe::Data { vbuf: vertex_buffer, out: rtv };
 
-        Ok(RenderImpl { slice, pso, data, _phantom: PhantomData })
+        Ok(
+            RenderImpl {
+                slice,
+                pso,
+                data,
+                broken_comms: false,
+                _phantom: PhantomData,
+            },
+        )
     }
 }
 
@@ -151,8 +165,19 @@ impl<P: Pipe> RenderImpl<Res, P> {
 
     pub fn update(&mut self, state: &DriverState<P>, factory: &mut g::Factory) {
 
-        while let Some(msg) = state.pipe.try_recv::<api::DownResponse>().unwrap() {
-            println!("=== {:?} ===", msg);
+        if !self.broken_comms {
+            loop {
+                match state.pipe.try_recv::<api::DownResponse>() {
+                    Ok(None) => break,
+                    Ok(Some(msg)) => println!("=== {:?} ===", msg),
+                    Err(Error(ErrorKind::BrokenComms, _)) => {
+                        println!("=== COMMS BROKEN ===");
+                        self.broken_comms = true;
+                        break;
+                    }
+                    Err(e) => panic!(e),
+                }
+            }
         }
 
         // update gpu state here...

@@ -1,6 +1,9 @@
 #![feature(box_syntax, drop_types_in_const)]
+#![recursion_limit = "1024"]
 
 extern crate digest;
+#[macro_use]
+extern crate error_chain;
 extern crate futures;
 extern crate futures_cpupool;
 #[macro_use]
@@ -20,6 +23,7 @@ mod common;
 mod connector;
 #[path="../../driver/src/driver_abi.rs"]
 mod driver_abi;
+mod errors;
 mod net;
 mod receive;
 mod render_loop;
@@ -30,7 +34,9 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
-use futures::Future;
+use common::OurFuture;
+use errors::{ErrorKind, ResultExt};
+use futures::{Future, future};
 use render_loop::Engine;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
@@ -57,7 +63,9 @@ fn main() {
             let mut core = Core::new().unwrap();
             let handle = core.handle();
 
-            let client = TcpStream::connect(&addr, &handle).and_then(
+            let client = TcpStream::connect(&addr, &handle)
+                .then(|res| res.chain_err(|| format!("couldn't connect to server")),)
+                .and_then(
                 |sock| {
                     let (reader, writer) = sock.split();
 
@@ -72,7 +80,7 @@ fn main() {
                     welcome
                         .join(greeting)
                         .and_then(
-                            move |((r, info, path), w)| {
+                            move |((r, info, path), w)| -> OurFuture<_> {
                                 println!("driver {}", info.digest.short_hex());
 
                                 let (driver_tx, driver_rx) = mpsc::channel();
@@ -81,15 +89,20 @@ fn main() {
                                 let net_comms = net::Comms { tx: driver_tx, rx: rx };
 
                                 // inform the draw thread about our new driver
-                                update_tx.send((path, box comms)).unwrap();
+                                if update_tx.send((path, box comms)).is_err() {
+                                    return box future::err(ErrorKind::BrokenComms.into());
+                                }
 
-                                box net_comms.handle(r, w).map(|_| println!("net: donezo"))
+                                net_comms.handle(r, w)
                             },
                         )
                 },
             );
 
-            core.run(client).unwrap();
+            match core.run(client) {
+                Ok((_r, _w)) => println!("net: donezo"),
+                Err(e) => errors::display_net_thread_error(e).expect("net: stderr?"),
+            }
         },
     );
 

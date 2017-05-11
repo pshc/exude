@@ -1,8 +1,10 @@
-use std::io::{self, ErrorKind};
+use std::io;
 use std::marker::PhantomData;
 
 use bincode;
 use serde::{Deserialize, Serialize};
+
+pub use bincode::{Error, ErrorKind, Result};
 
 /// Holds the result of `bincode::serialize`.
 #[derive(Clone)]
@@ -12,13 +14,6 @@ pub struct Bincoded<T> {
 }
 
 pub static BINCODED_MAX: u64 = 0xffff;
-
-fn to_io_err(err: bincode::Error) -> io::Error {
-    match *err {
-        bincode::ErrorKind::IoError(io) => io,
-        e => io::Error::new(ErrorKind::Other, e),
-    }
-}
 
 impl<T> Bincoded<T> {
     /// Returns the number of serialized bytes stored. Does not include length header.
@@ -35,14 +30,14 @@ impl<T> Bincoded<T> {
 
 impl<T: Serialize> Bincoded<T> {
     /// Serializes `value`, storing the serialized bytes in `self`.
-    pub fn new(value: &T) -> io::Result<Self> {
+    pub fn new(value: &T) -> Result<Self> {
         let size_limit = bincode::Bounded(BINCODED_MAX);
-        let vec = bincode::serialize(value, size_limit).map_err(to_io_err)?;
+        let vec = bincode::serialize(value, size_limit)?;
         Ok(Bincoded { vec, _phantom: PhantomData })
     }
 }
 
-pub fn deserialize_exact<R, T>(slice: R) -> io::Result<T>
+pub fn deserialize_exact<R, T>(slice: R) -> Result<T>
 where
     R: AsRef<[u8]>,
     for<'de> T: Deserialize<'de>,
@@ -50,18 +45,16 @@ where
     let slice = slice.as_ref();
     let len = slice.len() as u64;
     let ref mut cursor = io::Cursor::new(slice);
-    let result = bincode::deserialize_from(cursor, bincode::Infinite)
-        .map_err(to_io_err)?;
+    let result = bincode::deserialize_from(cursor, bincode::Infinite)?;
 
     // ensure the deserializer consumed every last byte
     if cursor.position() == len {
         Ok(result)
     } else {
         let msg = format!("extra bytes ({})", len - cursor.position());
-        let io = io::Error::new(ErrorKind::InvalidData, msg);
-        Err(io)
+        let io = io::Error::new(io::ErrorKind::InvalidData, msg);
+        Err(Box::new(ErrorKind::IoError(io)))
     }
-
 }
 
 impl<T> Bincoded<T>
@@ -69,7 +62,7 @@ where
     for<'de> T: Deserialize<'de>,
 {
     /// Deserialize the contained bytes.
-    pub fn deserialize(&self) -> io::Result<T> {
+    pub fn deserialize(&self) -> Result<T> {
         deserialize_exact(self)
     }
 }
@@ -96,8 +89,12 @@ fn roundtrip() {
 #[test]
 fn too_short() {
     let short: Bincoded<u32> = Bincoded { vec: vec![1, 2, 3], _phantom: PhantomData };
-    let err = short.deserialize().unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
+    match *short.deserialize().unwrap_err() {
+        ErrorKind::IoError(io) => {
+            assert_eq!(io.kind(), io::ErrorKind::UnexpectedEof);
+        }
+        e => panic!(e),
+    }
 }
 
 #[test]
@@ -106,7 +103,11 @@ fn too_long() {
     use std::error::Error;
     let bytes: Vec<u8> = iter::repeat(0).take(17).collect();
     let long: Bincoded<(u64, u64)> = Bincoded { vec: bytes, _phantom: PhantomData };
-    let err = long.deserialize().unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::InvalidData);
-    assert_eq!(err.description(), "extra bytes (1)");
+    match *long.deserialize().unwrap_err() {
+        ErrorKind::IoError(io) => {
+            assert_eq!(io.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(io.description(), "extra bytes (1)");
+        }
+        e => panic!(e),
+    }
 }

@@ -1,14 +1,15 @@
-use std::io::{self, ErrorKind, Write};
+use std::io::{self, Write};
 use std::mem;
 use std::ptr;
 
+use errors::*;
 use driver_abi::DriverCallbacks;
 use proto::bincoded::{self, Bincoded};
 use proto::serde::{Deserialize, Serialize};
 
 pub trait Pipe {
-    fn send<T: Serialize>(&self, &T) -> io::Result<()>;
-    fn try_recv<T>(&self) -> io::Result<Option<T>>
+    fn send<T: Serialize>(&self, &T) -> Result<()>;
+    fn try_recv<T>(&self) -> Result<Option<T>>
     where
         for<'de> T: Deserialize<'de>;
 }
@@ -29,21 +30,19 @@ impl Wrapper {
 }
 
 impl Pipe for Wrapper {
-    fn send<T: Serialize>(&self, msg: &T) -> io::Result<()> {
+    fn send<T: Serialize>(&self, msg: &T) -> Result<()> {
         let cbs = unsafe { &*self.0 };
 
         // so many copies... ugh!
         let bin = Bincoded::new(msg)?;
         let vec: Vec<u8> = bin.into();
         assert!(vec.len() <= ::std::i32::MAX as usize);
-        if (cbs.send_fn)(cbs.ctx, vec.as_ptr(), vec.len() as i32) >= 0 {
-            Ok(())
-        } else {
-            Err(io::Error::new(ErrorKind::BrokenPipe, "send: pipe broken"))
-        }
+        let code = (cbs.send_fn)(cbs.ctx, vec.as_ptr(), vec.len() as i32);
+        ensure!(code >= 0, ErrorKind::BrokenComms);
+        Ok(())
     }
 
-    fn try_recv<T>(&self) -> io::Result<Option<T>>
+    fn try_recv<T>(&self) -> Result<Option<T>>
     where
         for<'de> T: Deserialize<'de>,
     {
@@ -52,14 +51,13 @@ impl Pipe for Wrapper {
         let len = (cbs.try_recv_fn)(cbs.ctx, &mut buf_ptr);
         if len > 0 {
             let slice = unsafe { ::std::slice::from_raw_parts(buf_ptr, len as usize) };
-            let result = bincoded::deserialize_exact(slice);
+            let result = bincoded::deserialize_exact(slice).chain_err(|| "couldn't decode message");
             unsafe { drop(Box::from_raw(buf_ptr)) }
             result.map(Some)
         } else if len == 0 {
             Ok(None)
         } else {
-            let err = io::Error::new(ErrorKind::BrokenPipe, "try_recv: pipe broken");
-            Err(err)
+            bail!(ErrorKind::BrokenComms);
         }
     }
 }

@@ -1,7 +1,7 @@
-use std::io::{self, ErrorKind};
 use std::sync::mpsc;
 
-use common::{self, IoFuture};
+use common::{self, OurFuture};
+use errors::*;
 use futures::{self, Future, Stream};
 use tokio_io::{AsyncRead, AsyncWrite};
 
@@ -11,7 +11,7 @@ pub struct Comms {
 }
 
 impl Comms {
-    pub fn handle<R, W>(self, r: R, w: W) -> IoFuture<(R, W)>
+    pub fn handle<R, W>(self, r: R, w: W) -> OurFuture<(R, W)>
     where
         R: AsyncRead + 'static,
         W: AsyncWrite + 'static,
@@ -22,13 +22,13 @@ impl Comms {
         let read = common::read_with_length(r).and_then(
             move |(r, vec)| {
                 tx.send(vec.into_boxed_slice())
-                    .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "core: done reading"),)
+                    .chain_err(|| ErrorKind::BrokenComms)
                     .map(|_| r)
             },
         );
 
         let write = rx
-        .map_err(|()| io::Error::new(ErrorKind::BrokenPipe, "core: done writing"))
+        .map_err(|()| ErrorKind::BrokenComms.into())
         .fold(w, |w, msg| {
             common::write_with_length(w, msg).map(|(w, _)| w)
         });
