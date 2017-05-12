@@ -5,6 +5,7 @@ fn main() {
     let profile = env::var("PROFILE").unwrap();
     let mut deps = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     deps.pop();
+    deps.push("g");
     deps.push("target");
     deps.push(profile);
     deps.push("deps");
