@@ -1,4 +1,4 @@
-#![feature(box_syntax)]
+#![feature(box_syntax, nonzero)]
 #![recursion_limit = "1024"]
 
 #[macro_use]
@@ -81,6 +81,16 @@ const TRIANGLE: [Vertex; 3] = [
     Vertex { pos: [0.0, 0.5], color: [0.0, 0.0, 1.0] },
 ];
 
+/// Convert a Newtype(NonZero<*T>) to &T.
+macro_rules! cast_ptr {
+    ($ptr:ident as &mut $t:ty) => {(
+        &mut *($ptr.0.get() as *mut $t)
+    )};
+    ($ptr:ident as & $t:ty) => {(
+        & *($ptr.0.get() as *const $t)
+    )};
+}
+
 #[no_mangle]
 pub extern "C" fn gl_setup(
     state_ref: DriverRef,
@@ -88,8 +98,7 @@ pub extern "C" fn gl_setup(
     rtv: g::RenderTargetView,
 ) -> Option<g::GfxBox> {
 
-    let state: *const DriverState<Wrapper> = *state_ref.0 as *const DriverState<Wrapper>;
-    let state: &DriverState<Wrapper> = unsafe { &*state };
+    let state = unsafe { cast_ptr!(state_ref as &DriverState<Wrapper>) };
     match RenderImpl::<Res, Wrapper>::new(state, factory, rtv) {
         Ok(render) => {
             let ptr = Box::into_raw(box render) as *mut ();
@@ -143,17 +152,14 @@ impl<P: Pipe> RenderImpl<Res, P> {
 
 #[no_mangle]
 pub extern "C" fn gl_update(ctx: g::GfxRefMut, state_ref: DriverRef, factory: &mut g::Factory) {
-    let render = *ctx.0 as *mut RenderImpl<Res, Wrapper>;
-    let render: &mut RenderImpl<Res, Wrapper> = unsafe { &mut *render };
-    let state_ptr = *state_ref.0 as *const DriverState<Wrapper>;
-    let state = unsafe { &*state_ptr };
+    let render = unsafe { cast_ptr!(ctx as &mut RenderImpl<Res, Wrapper>) };
+    let state = unsafe { cast_ptr!(state_ref as &DriverState<Wrapper>) };
     render.update(state, factory);
 }
 
 #[no_mangle]
 pub extern "C" fn gl_draw(ctx: g::GfxRef, encoder: &mut Encoder) {
-    let render = *ctx.0 as *const RenderImpl<Res, Wrapper>;
-    let render: &RenderImpl<Res, Wrapper> = unsafe { &*render };
+    let render = unsafe { cast_ptr!(ctx as &RenderImpl<Res, Wrapper>) };
     render.draw(encoder);
 }
 

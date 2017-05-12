@@ -62,16 +62,16 @@ macro_rules! backend_items {
             }
 
             pub fn borrow<'a>(&'a self) -> GfxRef<'a> {
-                let ptr = unsafe { NonZero::new(*self.0 as *const ()) };
+                let ptr = unsafe { NonZero::new(self.0.get() as *const ()) };
                 GfxRef(ptr, PhantomData)
             }
 
             pub fn borrow_mut<'a>(&'a mut self) -> GfxRefMut<'a> {
-                GfxRefMut(self.0 as NonZero<*mut ()>, PhantomData)
+                GfxRefMut(self.0, PhantomData)
             }
 
             pub fn consume(self) -> *mut () {
-                *self.0
+                self.0.get()
             }
         }
 
@@ -115,12 +115,12 @@ impl DriverBox {
     }
 
     pub fn borrow<'a>(&'a self) -> DriverRef<'a> {
-        let ptr = unsafe { NonZero::new(*self.0 as *const ()) };
+        let ptr = unsafe { NonZero::new(self.0.get() as *const ()) };
         DriverRef(ptr, PhantomData)
     }
 
     pub fn consume(self) -> *mut () {
-        *self.0
+        self.0.get()
     }
 }
 
