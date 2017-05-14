@@ -20,7 +20,13 @@ pub extern crate gfx_window_glutin;
 pub extern crate gfx_window_metal;
 #[cfg(feature = "gl")]
 pub extern crate glutin;
-pub extern crate winit;
+#[cfg(feature = "metal")]
+extern crate winit;
+
+#[cfg(all(feature = "gl", not(feature = "metal")))]
+pub use glutin::{ElementState, Event, MouseButton, MouseScrollDelta, ScanCode, VirtualKeyCode};
+#[cfg(feature = "metal")]
+pub use winit::{ElementState, Event, MouseButton, MouseScrollDelta, ScanCode, VirtualKeyCode};
 
 use core::nonzero::NonZero;
 use std::marker::PhantomData;

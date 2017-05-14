@@ -127,7 +127,7 @@ fn main() {
             if render_loop::should_quit(&event) {
                 break 'main;
             }
-            if let g::winit::Event::Resized(_w, _h) = *&event {
+            if let g::Event::Resized(_w, _h) = *&event {
                 gfx_window_glutin::update_views(
                     &window,
                     &mut engine.main_color,

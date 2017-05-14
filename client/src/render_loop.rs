@@ -1,5 +1,5 @@
 use g::gfx;
-use g::winit::Event;
+use g::Event;
 
 /// Called upon by the render loop.
 pub trait Engine<R: gfx::Resources> {
@@ -12,7 +12,7 @@ pub trait Engine<R: gfx::Resources> {
 }
 
 pub fn should_quit(event: &Event) -> bool {
-    use g::winit::VirtualKeyCode::{Escape, Grave};
+    use g::VirtualKeyCode::{Escape, Grave};
 
     match *event {
         Event::KeyboardInput(_, _, Some(Escape)) |
