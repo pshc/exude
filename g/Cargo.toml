@@ -5,7 +5,7 @@ version = "0.1.0"
 
 [dependencies]
 gfx = "0.16.0"
-gfx_text = "0.16.0"
+gfx_text = { path = "../../../vend/gfx_text" }
 
 [dependencies.gfx_device_gl]
 optional = true
