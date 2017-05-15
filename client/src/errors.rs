@@ -1,9 +1,15 @@
 use std::io::{self, Write};
 
+use g::gfx_text;
+
 use proto;
 
 error_chain! {
-    errors { BrokenComms }
+    errors {
+        BrokenComms {}
+        /// Wrapped since `gfx_text::Error` doesn't impl Error
+        Text(t: gfx_text::Error) {}
+    }
     foreign_links {
         Bincode(proto::bincoded::Error);
     }

@@ -33,11 +33,6 @@ use proto::serde::{Deserialize, Serialize};
 
 mod errors {
     error_chain! {
-        errors {
-            /// Wrapped since `gfx_text::Error` doesn't impl Error
-            Text(t: ::g::gfx_text::Error) {
-            }
-        }
         links {
             Client(::client::Error, ::client::ErrorKind);
             Driver(::driver::Error, ::driver::ErrorKind);
@@ -144,7 +139,7 @@ fn main() {
         }
 
         engine.update(&state, &mut factory);
-        engine.draw(&mut encoder);
+        engine.draw(&mut encoder).unwrap();
 
         encoder.flush(&mut device);
         window.swap_buffers().unwrap();
@@ -207,7 +202,7 @@ impl Oneshot {
         let text = gfx_text::new(factory.clone())
             .with_size(30)
             .build()
-            .map_err(ErrorKind::Text)?;
+            .map_err(|e| -> client::Error { client::ErrorKind::Text(e).into() })?;
         Ok(
             Oneshot {
                 render,
@@ -224,10 +219,13 @@ impl Engine<g::Res> for Oneshot {
     type Factory = g::Factory;
     type State = DriverState<StaticComms>;
 
-    fn draw(&mut self, encoder: &mut g::Encoder) {
+    fn draw(&mut self, encoder: &mut g::Encoder) -> client::Result<()> {
         encoder.clear(&self.main_color, BLACK);
         self.render.draw(encoder);
         self.text.add("Oneshot", [10, 10], WHITE);
+        self.text
+            .draw(encoder, &self.main_color)
+            .map_err(|e| client::ErrorKind::Text(e).into())
     }
 
     fn update(&mut self, state: &DriverState<StaticComms>, factory: &mut g::Factory) {

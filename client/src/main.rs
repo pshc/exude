@@ -35,7 +35,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use common::OurFuture;
-use errors::{ErrorKind, ResultExt};
+use errors::*;
 use futures::{Future, future};
 use render_loop::Engine;
 use tokio_core::net::TcpStream;
@@ -139,7 +139,7 @@ fn main() {
         }
 
         engine.update(&(), &mut factory);
-        engine.draw(&mut encoder);
+        engine.draw(&mut encoder).unwrap();
 
         encoder.flush(&mut device);
         window.swap_buffers().unwrap();
@@ -193,7 +193,7 @@ impl Engine<g::Res> for Hot {
     // connector::Driver holds the driver's state for us
     type State = ();
 
-    fn draw(&mut self, encoder: &mut g::Encoder) {
+    fn draw(&mut self, mut encoder: &mut g::Encoder) -> Result<()> {
         encoder.clear(&self.main_color, BLACK);
 
         if let Some((ref driver, ref ctx)) = self.driver {
@@ -204,6 +204,9 @@ impl Engine<g::Res> for Hot {
             self.text.add("Loading...", [10, 10], WHITE);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+
+        self.text.draw(&mut encoder, &self.main_color)
+            .map_err(|t| ErrorKind::Text(t).into())
     }
 
     fn update(&mut self, _: &(), factory: &mut g::Factory) {
