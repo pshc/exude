@@ -143,20 +143,22 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
 
     let mut alive = true;
     loop {
-        events_loop.poll_events(|event| {
-            let g::Event::WindowEvent { ref event, .. } = event;
-            if render_loop::should_quit(&event) {
-                alive = false;
-                return;
+        events_loop.poll_events(
+            |event| {
+                let g::Event::WindowEvent { ref event, .. } = event;
+                if render_loop::should_quit(&event) {
+                    alive = false;
+                    return;
+                }
+                if let g::WindowEvent::Resized(_w, _h) = *event {
+                    gfx_window_glutin::update_views(
+                        &window,
+                        &mut engine.main_color,
+                        &mut engine.main_depth,
+                    );
+                }
             }
-            if let g::WindowEvent::Resized(_w, _h) = *event {
-                gfx_window_glutin::update_views(
-                    &window,
-                    &mut engine.main_color,
-                    &mut engine.main_depth,
-                );
-            }
-        });
+        );
         if !alive {
             break;
         }
@@ -228,14 +230,7 @@ impl Oneshot {
             .with_size(30)
             .build()
             .map_err(|e| -> client::Error { client::ErrorKind::Text(e).into() })?;
-        Ok(
-            Oneshot {
-                render,
-                main_color: rtv,
-                main_depth: dsv,
-                text,
-            },
-        )
+        Ok(Oneshot { render, main_color: rtv, main_depth: dsv, text })
     }
 }
 
@@ -253,9 +248,11 @@ impl Engine<g::Res> for Oneshot {
             .map_err(|e| client::ErrorKind::Text(e).into())
     }
 
-    fn update(&mut self, state: &DriverState<StaticComms>, factory: &mut g::Factory)
-        -> client::Result<()>
-    {
+    fn update(
+        &mut self,
+        state: &DriverState<StaticComms>,
+        factory: &mut g::Factory,
+    ) -> client::Result<()> {
         self.render.update(state, factory);
         Ok(())
     }

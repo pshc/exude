@@ -89,7 +89,7 @@ fn serve(addr: &SocketAddr) -> Result<()> {
             |(sock, addr)| {
                 handle.spawn(serve_client(sock, addr));
                 Ok(())
-            },
+            }
         );
 
     core.run(server).chain_err(|| "core listener failed")
@@ -119,7 +119,7 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item = (), Erro
                     unimplemented!()
                 }
             }
-        },
+        }
     )
             .and_then(
         move |rw| {
@@ -142,14 +142,14 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item = (), Erro
                                     box future::ok(Loop::Break(()))
                                 }
                             }
-                        },
+                        }
                     );
 
                     dispatch_req
                 }
             )
 
-        },
+        }
     )
             .map(|_r| ())
             .map_err(
@@ -158,7 +158,7 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item = (), Erro
             for e in err.iter().skip(1) {
                 println!("  caused by: {}", e);
             }
-        },
+        }
     )
 }
 
@@ -177,14 +177,14 @@ impl HashedHeapFile {
         let mut meta_vec = Vec::new();
         let n = File::open(meta_path)
             .and_then(|mut f| f.read_to_end(&mut meta_vec))
-            .chain_err(|| format!("couldn't open metadata ({})", meta_path.display()),)?;
+            .chain_err(|| format!("couldn't open metadata ({})", meta_path.display()))?;
         if n == 0 {
             bail!("metadata was empty");
         }
         let info: DriverInfo =
             unsafe { Bincoded::from_vec(meta_vec) }
                 .deserialize()
-                .chain_err(|| format!("couldn't decode metadata ({})", meta_path.display()),)?;
+                .chain_err(|| format!("couldn't decode metadata ({})", meta_path.display()))?;
         let len = info.len;
 
         assert!(info.len <= handshake::INLINE_MAX);
@@ -197,7 +197,7 @@ impl HashedHeapFile {
                 |mut bin| {
                     bin.read_exact(&mut driver_buf)?;
                     Ok(bin.read(&mut [0])? == 0)
-                },
+                }
             )
             .chain_err(|| format!("couldn't open driver ({})", bin_path.display()))?;
         if !eof {
@@ -223,12 +223,9 @@ impl HashedHeapFile {
         box common::write_with_length(w, coded)
                 .and_then(
             move |(w, _)| {
-                tokio_io::io::write_all(w, buf).then(
-                    |res| {
-                        res.chain_err(|| "couldn't write inline driver")
-                    },
-                )
-            },
+                tokio_io::io::write_all(w, buf)
+                    .then(|res| res.chain_err(|| "couldn't write inline driver"))
+            }
         )
                 .map(|(w, _)| w)
     }

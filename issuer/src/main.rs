@@ -139,7 +139,7 @@ fn load_keys() -> Result<(sign::PublicKey, sign::SecretKey)> {
                 |mut f| {
                     f.read_exact(&mut pub_bytes)?;
                     Ok(f.read(&mut [0u8])? == 0)
-                },
+                }
             )
             .chain_err(|| "couldn't load public key")?;
         ensure!(eof, "public key too long");
@@ -158,7 +158,7 @@ fn load_keys() -> Result<(sign::PublicKey, sign::SecretKey)> {
                     f.read_exact(&mut nonce_bytes)?;
                     f.read_exact(&mut salt_bytes)?;
                     f.read_to_end(&mut ciphertext)
-                },
+                }
             )
             .chain_err(|| "couldn't load private key")?;
         nonce = secretbox::Nonce(nonce_bytes);
@@ -246,7 +246,7 @@ fn sign() -> Result<()> {
                 |mut file| {
                     file.write_all(bincoded.as_ref())?;
                     file.sync_all()
-                },
+                }
             )
             .chain_err(|| "couldn't write metadata")?;
     }
@@ -259,7 +259,7 @@ fn sign() -> Result<()> {
                 |mut dest| {
                     dest.write_all(&driver_bytes)?;
                     dest.sync_all()
-                },
+                }
             )
             .chain_err(|| "couldn't copy driver")?;
     }

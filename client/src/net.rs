@@ -24,7 +24,7 @@ impl Comms {
                 tx.send(vec.into_boxed_slice())
                     .chain_err(|| ErrorKind::BrokenComms)
                     .map(|_| r)
-            },
+            }
         );
 
         let write = rx

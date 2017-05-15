@@ -83,46 +83,46 @@ fn client(server_addr: SocketAddr) -> Result<()> {
             let handle = core.handle();
 
             let client = TcpStream::connect(&server_addr, &handle)
-                .then(|res| res.chain_err(|| format!("couldn't connect to server")),)
+                .then(|res| res.chain_err(|| format!("couldn't connect to server")))
                 .and_then(
-                |sock| {
-                    let (reader, writer) = sock.split();
+                    |sock| {
+                        let (reader, writer) = sock.split();
 
-                    let greeting = {
-                        let cached_driver = None;
-                        let hello = handshake::Hello(cached_driver);
-                        common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
-                    };
+                        let greeting = {
+                            let cached_driver = None;
+                            let hello = handshake::Hello(cached_driver);
+                            common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
+                        };
 
-                    let welcome = receive::fetch_driver(reader);
+                        let welcome = receive::fetch_driver(reader);
 
-                    welcome
-                        .join(greeting)
-                        .and_then(
-                            move |((r, info, path), w)| -> OurFuture<_> {
-                                println!("driver {}", info.digest.short_hex());
+                        welcome
+                            .join(greeting)
+                            .and_then(
+                                move |((r, info, path), w)| -> OurFuture<_> {
+                                    println!("driver {}", info.digest.short_hex());
 
-                                let (driver_tx, driver_rx) = mpsc::channel();
-                                let (tx, rx) = futures::sync::mpsc::unbounded();
-                                let comms = connector::DriverComms { rx: driver_rx, tx: tx };
-                                let net_comms = net::Comms { tx: driver_tx, rx: rx };
+                                    let (driver_tx, driver_rx) = mpsc::channel();
+                                    let (tx, rx) = futures::sync::mpsc::unbounded();
+                                    let comms = connector::DriverComms { rx: driver_rx, tx: tx };
+                                    let net_comms = net::Comms { tx: driver_tx, rx: rx };
 
-                                // inform the draw thread about our new driver
-                                if update_tx.send((path, box comms)).is_err() {
-                                    return box future::err(ErrorKind::BrokenComms.into());
+                                    // inform the draw thread about our new driver
+                                    if update_tx.send((path, box comms)).is_err() {
+                                        return box future::err(ErrorKind::BrokenComms.into());
+                                    }
+
+                                    net_comms.handle(r, w)
                                 }
-
-                                net_comms.handle(r, w)
-                            },
-                        )
-                },
-            );
+                            )
+                    }
+                );
 
             match core.run(client) {
                 Ok((_r, _w)) => println!("net: donezo"),
                 Err(e) => errors::display_net_thread_error(e).expect("net: stderr?"),
             }
-        },
+        }
     );
 
     let events_loop = g::EventsLoop::new();
@@ -139,20 +139,22 @@ fn client(server_addr: SocketAddr) -> Result<()> {
 
     let mut alive = true;
     loop {
-        events_loop.poll_events(|event| {
-            let g::Event::WindowEvent { ref event, .. } = event;
-            if render_loop::should_quit(&event) {
-                alive = false;
-                return;
+        events_loop.poll_events(
+            |event| {
+                let g::Event::WindowEvent { ref event, .. } = event;
+                if render_loop::should_quit(&event) {
+                    alive = false;
+                    return;
+                }
+                if let g::WindowEvent::Resized(_w, _h) = *event {
+                    gfx_window_glutin::update_views(
+                        &window,
+                        &mut engine.main_color,
+                        &mut engine.main_depth,
+                    );
+                }
             }
-            if let g::WindowEvent::Resized(_w, _h) = *event {
-                gfx_window_glutin::update_views(
-                    &window,
-                    &mut engine.main_color,
-                    &mut engine.main_depth,
-                );
-            }
-        });
+        );
         if !alive {
             break;
         }
@@ -203,7 +205,7 @@ impl Hot {
                 main_depth: dsv,
                 text,
                 update_rx,
-            },
+            }
         )
     }
 }

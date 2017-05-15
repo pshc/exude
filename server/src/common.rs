@@ -23,9 +23,9 @@ pub fn read_with_length<R: AsyncRead + 'static>(reader: R) -> OurFuture<(R, Vec<
                 buf.set_len(len);
             }
             tokio_io::io::read_exact(reader, buf)
-        },
+        }
     )
-            .then(|res| res.chain_err(|| "couldn't read length-delimited packet"),)
+            .then(|res| res.chain_err(|| "couldn't read length-delimited packet"))
 }
 
 /// Reads a 16-bit length header and then buffers and deserializes bytes.
@@ -41,7 +41,7 @@ where
                 .deserialize()
                 .map(|val| (reader, val))
                 .map_err(Into::into)
-        },
+        }
     )
 }
 
@@ -60,7 +60,7 @@ where
     let len_buf = [(len >> 8) as u8, len as u8];
     box tokio_io::io::write_all(writer, len_buf)
             .and_then(move |(writer, _)| tokio_io::io::write_all(writer, vec))
-            .then(|res| res.chain_err(|| "couldn't write length-delimited packet"),)
+            .then(|res| res.chain_err(|| "couldn't write length-delimited packet"))
 }
 
 /// Write a 16-bit length header, and then the serialized bytes.

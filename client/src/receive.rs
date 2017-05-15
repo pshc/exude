@@ -39,7 +39,7 @@ pub fn fetch_driver<R: AsyncRead + 'static>(reader: R) -> OurFuture<(R, Box<Driv
                     box future::err(msg.into())
                 }
             }
-        },
+        }
     )
 }
 
@@ -82,19 +82,19 @@ fn verify_and_save<R: AsyncRead + 'static>(
                             |mut file| {
                                 file.write_all(&buf)?;
                                 file.sync_data()
-                            },
+                            }
                         )
                         .chain_err(|| "couldn't store driver in repo")?;
 
                     Ok((info, path))
-                },
+                }
             );
 
             CpuPool::new(1)
                 // todo use `spawn_fn`
                 .spawn(future)
                 .map(|(info, path)| (reader, info, path))
-        },
+        }
     )
 }
 
@@ -116,7 +116,7 @@ fn repo_path() -> &'static Path {
             }
 
             unsafe { PATH = Some(path) }
-        },
+        }
     );
 
     unsafe { PATH.as_ref().expect("repo path") }

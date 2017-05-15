@@ -145,7 +145,7 @@ impl<P: Pipe> RenderImpl<Res, P> {
                 data,
                 broken_comms: false,
                 _phantom: PhantomData,
-            },
+            }
         )
     }
 }
