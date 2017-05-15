@@ -138,7 +138,11 @@ impl DriverComms {
 }
 
 extern "C" fn driver_send(ctx: CallbackCtx, buf: *const u8, len: i32) -> i32 {
-    let comms = unsafe { (ctx.0 as *mut DriverComms).as_mut().unwrap() };
+    let comms = unsafe {
+        (ctx.0 as *mut DriverComms)
+            .as_mut()
+            .expect("driver_send: null")
+    };
     assert!(len > 0);
     assert!(!buf.is_null());
 
@@ -150,7 +154,11 @@ extern "C" fn driver_send(ctx: CallbackCtx, buf: *const u8, len: i32) -> i32 {
 }
 
 extern "C" fn driver_try_recv(ctx: CallbackCtx, buf_out: *mut *mut u8) -> i32 {
-    let comms = unsafe { (ctx.0 as *mut DriverComms).as_mut().unwrap() };
+    let comms = unsafe {
+        (ctx.0 as *mut DriverComms)
+            .as_mut()
+            .expect("driver_try_recv: null")
+    };
     assert!(!buf_out.is_null());
 
     match comms.rx.try_recv() {

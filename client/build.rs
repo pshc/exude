@@ -6,8 +6,8 @@ fn main() {
                     env::var_os("CARGO_FEATURE_STATIC_METAL").is_some();
 
     if !is_static {
-        let profile = env::var("PROFILE").unwrap();
-        let mut deps = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+        let profile = env::var("PROFILE").expect("profile");
+        let mut deps = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo manifest dir"));
         deps.pop();
         deps.push("g");
         deps.push("target");

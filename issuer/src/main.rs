@@ -275,7 +275,7 @@ fn digest_from_bytes(bytes: &[u8]) -> Digest {
     let mut hasher = Shake128::default();
     hasher.digest(bytes);
     let mut result = [0u8; proto::digest::LEN];
-    hasher.variable_result(&mut result).unwrap();
+    hasher.variable_result(&mut result).expect("hashing");
     Digest(result)
 }
 

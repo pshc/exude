@@ -31,13 +31,11 @@ mod render_loop;
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process;
 use std::sync::mpsc;
 use std::thread;
 
-use common::OurFuture;
-use errors::*;
 use futures::{Future, future};
-use render_loop::Engine;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use tokio_io::AsyncRead;
@@ -47,23 +45,44 @@ use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin;
 
+use common::OurFuture;
+use errors::*;
 use proto::handshake;
+use render_loop::Engine;
 
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
 fn main() {
-    let addr: SocketAddr = ([127, 0, 0, 1], 2001).into();
+    let addr = ([127, 0, 0, 1], 2001).into();
+
+    if let Err(e) = client(addr) {
+        let stderr = io::stderr();
+        let oops = "couldn't write to stderr";
+        let mut log = stderr.lock();
+        if let Some(backtrace) = e.backtrace() {
+            writeln!(log, "\n{:?}\n", backtrace).expect(oops);
+        }
+        writeln!(log, "error: {}", e).expect(oops);
+        for e in e.iter().skip(1) {
+            writeln!(log, "caused by: {}", e).expect(oops);
+        }
+        drop(log);
+        process::exit(1);
+    }
+}
+
+fn client(server_addr: SocketAddr) -> Result<()> {
 
     // for sending a new driver from net to draw thread
     let (update_tx, update_rx) = mpsc::channel::<DriverUpdate>();
 
     let _net_thread = thread::spawn(
         move || {
-            let mut core = Core::new().unwrap();
+            let mut core = Core::new().expect("net: core");
             let handle = core.handle();
 
-            let client = TcpStream::connect(&addr, &handle)
+            let client = TcpStream::connect(&server_addr, &handle)
                 .then(|res| res.chain_err(|| format!("couldn't connect to server")),)
                 .and_then(
                 |sock| {
@@ -114,7 +133,7 @@ fn main() {
     let (window, mut device, mut factory, main_color, main_depth) =
         gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(builder, &events_loop);
 
-    let mut engine = Hot::new(&mut factory, main_color, main_depth, update_rx).unwrap();
+    let mut engine = Hot::new(&mut factory, main_color, main_depth, update_rx)?;
 
     let mut encoder = factory.create_command_buffer().into();
 
@@ -138,15 +157,16 @@ fn main() {
             break;
         }
 
-        engine.update(&(), &mut factory);
-        engine.draw(&mut encoder).unwrap();
+        engine.update(&(), &mut factory)?;
+        engine.draw(&mut encoder)?;
 
         encoder.flush(&mut device);
-        window.swap_buffers().unwrap();
+        window.swap_buffers().chain_err(|| "swapping buffers")?;
         device.cleanup();
     }
 
     drop(engine); // waits for driver cleanup
+    Ok(())
 }
 
 /// Our driver-loading Engine.
@@ -167,13 +187,14 @@ impl Hot {
         rtv: g::RenderTargetView,
         dsv: g::DepthStencilView,
         update_rx: mpsc::Receiver<DriverUpdate>,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
 
-        let basic_vis = basic::Renderer::new(factory, rtv.clone())?;
+        let basic_vis = basic::Renderer::new(factory, rtv.clone())
+            .chain_err(|| "couldn't set up basic renderer")?;
         let text = gfx_text::new(factory.clone())
             .with_size(30)
             .build()
-            .unwrap(); // xxx
+            .map_err(ErrorKind::Text)?;
         Ok(
             Hot {
                 basic_vis,
@@ -205,15 +226,16 @@ impl Engine<g::Res> for Hot {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        self.text.draw(&mut encoder, &self.main_color)
+        self.text
+            .draw(&mut encoder, &self.main_color)
             .map_err(|t| ErrorKind::Text(t).into())
     }
 
-    fn update(&mut self, _: &(), factory: &mut g::Factory) {
+    fn update(&mut self, _: &(), factory: &mut g::Factory) -> Result<()> {
 
         if let Ok((path, comms)) = self.update_rx.try_recv() {
             println!("Loading driver...");
-            io::stdout().flush().unwrap();
+            io::stdout().flush().expect("stderr");
 
             match connector::load(&path, comms) {
                 Ok(new_driver) => {
@@ -226,7 +248,7 @@ impl Engine<g::Res> for Hot {
                     } else {
                         println!("Setting up driver...");
                     }
-                    io::stdout().flush().unwrap();
+                    io::stdout().flush().expect("stderr");
 
                     match new_driver.gfx_setup(factory, self.main_color.clone()) {
                         Some(ctx) => {
@@ -249,8 +271,9 @@ impl Engine<g::Res> for Hot {
         if let Some((ref driver, ref mut ctx)) = self.driver {
             driver.update(ctx.borrow_mut(), factory);
         } else {
-            self.basic_vis.update(factory, &self.main_color);
+            self.basic_vis.update(factory, &self.main_color)?;
         }
+        Ok(())
     }
 }
 

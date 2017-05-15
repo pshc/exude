@@ -119,14 +119,14 @@ fn repo_path() -> &'static Path {
         },
     );
 
-    unsafe { PATH.as_ref().unwrap() }
+    unsafe { PATH.as_ref().expect("repo path") }
 }
 
 #[test]
 fn test_repo_path() {
     let path = repo_path();
     assert!(path.ends_with("repo"));
-    assert!(path.parent().unwrap().exists());
+    assert!(path.parent().expect("repo parent").exists());
 }
 
 pub mod utils {
@@ -147,7 +147,7 @@ pub mod utils {
         let mut hasher = Shake128::default();
         hasher.digest(bytes);
         let mut result = [0u8; digest::LEN];
-        hasher.variable_result(&mut result).unwrap();
+        hasher.variable_result(&mut result).expect("hashing");
         let digest = Digest(result);
 
         println!(

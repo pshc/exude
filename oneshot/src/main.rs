@@ -10,7 +10,9 @@ extern crate proto;
 extern crate tokio_core;
 extern crate tokio_io;
 
+use std::io::{self, Write};
 use std::net::SocketAddr;
+use std::process;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
@@ -47,6 +49,24 @@ const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 fn main() {
     let addr: SocketAddr = ([127, 0, 0, 1], 2001).into();
 
+    if let Err(e) = oneshot(addr) {
+        let stderr = io::stderr();
+        let oops = "couldn't write to stderr";
+        let mut log = stderr.lock();
+        if let Some(backtrace) = e.backtrace() {
+            writeln!(log, "\n{:?}\n", backtrace).expect(oops);
+        }
+        writeln!(log, "error: {}", e).expect(oops);
+        for e in e.iter().skip(1) {
+            writeln!(log, "caused by: {}", e).expect(oops);
+        }
+        drop(log);
+        process::exit(1);
+    }
+}
+
+fn oneshot(server_addr: SocketAddr) -> Result<()> {
+
     let io_comms;
     let net_comms;
     {
@@ -58,12 +78,15 @@ fn main() {
 
     let _net_thread = thread::spawn(
         move || {
-            let mut core = Core::new().unwrap();
+            let mut core = Core::new().expect("net: core");
             let handle = core.handle();
 
-            let client = TcpStream::connect(&addr, &handle)
+            let client = TcpStream::connect(&server_addr, &handle)
                 .then(|res| {
-                    client::ResultExt::chain_err(res, || format!("couldn't connect to {}", addr))
+                    client::ResultExt::chain_err(
+                        res,
+                        || format!("couldn't connect to {}", server_addr)
+                    )
                 })
                 .and_then(
                 |sock| -> OurFuture<_> {
@@ -114,7 +137,7 @@ fn main() {
     let (window, mut device, mut factory, main_color, main_depth) =
         gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(builder, &events_loop);
 
-    let mut engine = Oneshot::new(&state, &mut factory, main_color, main_depth).unwrap();
+    let mut engine = Oneshot::new(&state, &mut factory, main_color, main_depth)?;
 
     let mut encoder = factory.create_command_buffer().into();
 
@@ -138,16 +161,18 @@ fn main() {
             break;
         }
 
-        engine.update(&state, &mut factory);
-        engine.draw(&mut encoder).unwrap();
+        engine.update(&state, &mut factory)?;
+        engine.draw(&mut encoder)?;
 
         encoder.flush(&mut device);
-        window.swap_buffers().unwrap();
+        window.swap_buffers().chain_err(|| "swapping buffers")?;
         device.cleanup();
     }
 
     drop(engine);
     let _: StaticComms = state.shutdown();
+
+    Ok(())
 }
 
 struct StaticComms {
@@ -228,7 +253,10 @@ impl Engine<g::Res> for Oneshot {
             .map_err(|e| client::ErrorKind::Text(e).into())
     }
 
-    fn update(&mut self, state: &DriverState<StaticComms>, factory: &mut g::Factory) {
+    fn update(&mut self, state: &DriverState<StaticComms>, factory: &mut g::Factory)
+        -> client::Result<()>
+    {
         self.render.update(state, factory);
+        Ok(())
     }
 }

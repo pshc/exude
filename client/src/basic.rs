@@ -1,8 +1,8 @@
-use std::io::{self, ErrorKind};
-
 use g::{self, ColorFormat, Encoder, RenderTargetView, Res};
 use g::gfx::{self, IntoIndexBuffer};
 use g::gfx::traits::{Factory, FactoryExt};
+
+use errors::*;
 
 gfx_defines! {
     vertex Vertex {
@@ -28,10 +28,10 @@ pub struct Renderer<R: gfx::Resources> {
 }
 
 impl Renderer<Res> {
-    pub fn new(factory: &mut g::Factory, render_target: RenderTargetView) -> io::Result<Self> {
+    pub fn new(factory: &mut g::Factory, render_target: RenderTargetView) -> Result<Self> {
         let pso = factory
             .create_pipeline_simple(VERTEX_SHADER, FRAGMENT_SHADER, basic::new())
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+            .chain_err(|| "graphics pipeline")?;
 
         let indices = [0u16, 1, 2, 2, 1, 3].into_index_buffer(factory);
         let vertex_buffer = factory
@@ -41,9 +41,11 @@ impl Renderer<Res> {
                 gfx::memory::Usage::Upload,
                 gfx::Bind::empty(),
             )
-            .unwrap();
+            .chain_err(|| "creating vertex buffer")?;
         {
-            let mut vbuf = factory.write_mapping(&vertex_buffer).unwrap();
+            let mut vbuf = factory
+                .write_mapping(&vertex_buffer)
+                .chain_err(|| "setting up vertex buffer")?;
             vbuf[0] = Vertex { pos: [-1.0, -0.25], color: LEFT };
             vbuf[1] = Vertex { pos: [-1.0, 0.25], color: LEFT };
             vbuf[2] = Vertex { pos: [-1.0, -0.25], color: RIGHT };
@@ -61,12 +63,15 @@ impl Renderer<Res> {
         Ok(Renderer { slice, pso, data, progress: 0.0 })
     }
 
-    pub fn update(&mut self, factory: &mut g::Factory, _: &g::RenderTargetView) {
+    pub fn update(&mut self, factory: &mut g::Factory, _: &g::RenderTargetView) -> Result<()> {
         self.progress += 0.01;
         let width = self.progress * 2.0 - 1.0;
-        let mut vbuf = factory.write_mapping(&self.data.vbuf).unwrap(); // xxx
+        let mut vbuf = factory
+            .write_mapping(&self.data.vbuf)
+            .chain_err(|| "writing to vertex buffer")?;
         vbuf[2] = Vertex { pos: [width, -0.25], color: RIGHT };
         vbuf[3] = Vertex { pos: [width, 0.25], color: RIGHT };
+        Ok(())
     }
 
     pub fn draw(&self, mut encoder: &mut Encoder) {
