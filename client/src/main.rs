@@ -106,29 +106,36 @@ fn main() {
         },
     );
 
+    let events_loop = g::EventsLoop::new();
     let builder = glutin::WindowBuilder::new()
         .with_title("Germ".to_string())
         .with_dimensions(1024, 768)
         .with_vsync();
     let (window, mut device, mut factory, main_color, main_depth) =
-        gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(builder);
+        gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(builder, &events_loop);
 
     let mut engine = Hot::new(&mut factory, main_color, main_depth, update_rx).unwrap();
 
     let mut encoder = factory.create_command_buffer().into();
 
-    'main: loop {
-        for event in window.poll_events() {
+    let mut alive = true;
+    loop {
+        events_loop.poll_events(|event| {
+            let g::Event::WindowEvent { ref event, .. } = event;
             if render_loop::should_quit(&event) {
-                break 'main;
+                alive = false;
+                return;
             }
-            if let g::glutin::Event::Resized(_w, _h) = *&event {
+            if let g::WindowEvent::Resized(_w, _h) = *event {
                 gfx_window_glutin::update_views(
                     &window,
                     &mut engine.main_color,
                     &mut engine.main_depth,
                 );
             }
+        });
+        if !alive {
+            break;
         }
 
         engine.update(&(), &mut factory);

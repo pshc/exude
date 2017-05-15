@@ -4,7 +4,7 @@ name = "g"
 version = "0.1.0"
 
 [dependencies]
-gfx = "0.15.1"
+gfx = "0.16.0"
 gfx_text = "0.16.0"
 
 [dependencies.gfx_device_gl]
@@ -17,7 +17,7 @@ version = "0.2.0"
 
 [dependencies.gfx_window_glutin]
 optional = true
-version = "0.15"
+version = "0.16"
 
 [dependencies.gfx_window_metal]
 optional = true
@@ -25,11 +25,11 @@ version = "0.2.0"
 
 [dependencies.glutin]
 optional = true
-version = "0.7.4"
+version = "0.8.0"
 
 [dependencies.winit]
 optional = true
-version = "0.5.11"
+version = "0.6.0"
 
 [features]
 gl = ["gfx_device_gl", "gfx_window_glutin", "glutin"]

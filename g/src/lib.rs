@@ -24,9 +24,11 @@ pub extern crate glutin;
 extern crate winit;
 
 #[cfg(all(feature = "gl", not(feature = "metal")))]
-pub use glutin::{ElementState, Event, MouseButton, MouseScrollDelta, ScanCode, VirtualKeyCode};
+pub use glutin::{CursorState, ElementState, Event, EventsLoop, MouseButton, MouseCursor,
+                 MouseScrollDelta, ScanCode, Touch, TouchPhase, VirtualKeyCode, WindowEvent};
 #[cfg(feature = "metal")]
-pub use winit::{ElementState, Event, MouseButton, MouseScrollDelta, ScanCode, VirtualKeyCode};
+pub use winit::{CursorState, ElementState, Event, EventsLoop, MouseButton, MouseCursor,
+                MouseScrollDelta, ScanCode, Touch, TouchPhase, VirtualKeyCode, WindowEvent};
 
 use core::nonzero::NonZero;
 use std::marker::PhantomData;

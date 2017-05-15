@@ -1,5 +1,5 @@
 use g::gfx;
-use g::Event;
+use g::WindowEvent;
 
 /// Called upon by the render loop.
 pub trait Engine<R: gfx::Resources> {
@@ -11,13 +11,14 @@ pub trait Engine<R: gfx::Resources> {
     fn update(&mut self, &Self::State, &mut Self::Factory);
 }
 
-pub fn should_quit(event: &Event) -> bool {
+pub fn should_quit(event: &WindowEvent) -> bool {
+    use g::ElementState::Pressed;
     use g::VirtualKeyCode::{Escape, Grave};
 
     match *event {
-        Event::KeyboardInput(_, _, Some(Escape)) |
-        Event::KeyboardInput(_, _, Some(Grave)) |
-        Event::Closed => true,
+        WindowEvent::KeyboardInput(Pressed, _, Some(Escape), _) |
+        WindowEvent::KeyboardInput(Pressed, _, Some(Grave), _) |
+        WindowEvent::Closed => true,
         _ => false,
     }
 }
