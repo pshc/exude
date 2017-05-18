@@ -10,6 +10,7 @@ use std::str;
 use serde_json;
 use terminal_size::terminal_size;
 
+use errors::*;
 pub use self::diagnostic::Diagnostic;
 
 #[derive(Debug, Deserialize)]
@@ -79,6 +80,15 @@ pub mod target {
         Bench,
         Example,
         CustomBuild,
+    }
+
+    impl<'a> Kind<'a> {
+        pub fn is_bin(&self) -> bool {
+            match *self {
+                Kind::Bin => true,
+                _ => false,
+            }
+        }
     }
 
     impl<'de: 'a, 'a> de::Deserialize<'de> for Kind<'a> {
@@ -160,6 +170,16 @@ pub mod diagnostic {
         Help,
     }
 
+    impl Level {
+        pub fn is_show_stopper(&self) -> bool {
+            use self::Level::*;
+            match *self {
+                InternalCompilerError | Error => true,
+                Warning | Note | Help => false,
+            }
+        }
+    }
+
     impl fmt::Display for Level {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             use self::Level::*;
@@ -207,17 +227,16 @@ pub mod diagnostic {
     }
 }
 
+#[derive(Default)]
 pub struct Command<'a> {
     path: Option<&'a Path>,
     features: Option<&'a [&'a str]>,
+    bin_only: Option<&'a str>,
 }
 
 impl<'a> Command<'a> {
     pub fn new() -> Command<'a> {
-        Command {
-            path: None,
-            features: None,
-        }
+        Default::default()
     }
 
     /// Set the location of Cargo.toml.
@@ -236,7 +255,13 @@ impl<'a> Command<'a> {
         self
     }
 
-    pub fn spawn(&self, cmd: &str) -> io::Result<JsonStream> {
+    /// Build only the specified binary.
+    pub fn bin_only(&'a mut self, bin: &'a str) -> &'a mut Command<'a> {
+        self.bin_only = Some(bin);
+        self
+    }
+
+    pub fn spawn(&self, cmd: &str) -> Result<JsonStream> {
         let mut spawner = process::Command::new("cargo");
         spawner
             .stdin(Stdio::null())
@@ -252,8 +277,11 @@ impl<'a> Command<'a> {
             spawner.arg("--features");
             spawner.arg(features.join(" "));
         }
+        if let Some(ref bin) = self.bin_only {
+            spawner.args(&["--bin", bin]);
+        }
 
-        let mut child = spawner.spawn()?;
+        let mut child = spawner.spawn().chain_err(|| "couldn't run cargo")?;
 
         let stdout = mem::replace(&mut child.stdout, None).expect("child stdout");
         let stdout = BufReader::new(stdout);
@@ -296,7 +324,7 @@ impl AsRef<str> for JsonLine {
 }
 
 impl Iterator for JsonStream {
-    type Item = io::Result<JsonLine>;
+    type Item = Result<JsonLine>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut line = String::with_capacity(self.len_guess);
@@ -314,7 +342,7 @@ impl Iterator for JsonStream {
             }
             Err(e) => {
                 self.kill();
-                Some(Err(e))
+                Some(Err(e).chain_err(|| "couldn't parse `cargo --message-format json`"))
             }
         }
     }
