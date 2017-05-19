@@ -20,7 +20,9 @@ use proto::{Bincoded, Digest, DriverInfo, Signature};
 pub use secret::Secret;
 
 pub mod errors {
-    error_chain!{}
+    error_chain! {
+        errors { InvalidPassword }
+    }
 }
 pub use errors::*;
 
@@ -129,7 +131,7 @@ pub fn load_keys() -> Result<InsecureKeys> {
     let secret_key;
     {
         let mut plaintext = secretbox::open(&ciphertext, &nonce, &box_key)
-            .map_err(|()| ErrorKind::Msg("invalid box key".into()))?;
+            .map_err(|()| -> Error { ErrorKind::InvalidPassword.into() })?;
 
         if plaintext.len() != sign::SECRETKEYBYTES {
             bail!("bad secret key length ({})", plaintext.len());

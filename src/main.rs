@@ -20,7 +20,7 @@ use std::thread;
 use cargo::Output;
 use errors::*;
 
-mod errors {
+pub mod errors {
     error_chain! {
         links {
             Issuer(::issuer::Error, ::issuer::ErrorKind);
@@ -30,13 +30,17 @@ mod errors {
 }
 
 fn main() {
+    let oops = "couldn't write to stderr";
+    let mut stderr = io::stderr();
     match run() {
         Ok(()) => (),
         Err(Error(ErrorKind::BuildError, _)) |
         Err(Error(ErrorKind::Cancelled, _)) => process::exit(1),
+        Err(Error(ErrorKind::Issuer(issuer::ErrorKind::InvalidPassword), _)) => {
+            writeln!(stderr, "Invalid encryption password.").expect(oops);
+            process::exit(1);
+        }
         Err(e) => {
-            let stderr = io::stderr();
-            let oops = "couldn't write to stderr";
             let mut log = stderr.lock();
             if let Some(backtrace) = e.backtrace() {
                 writeln!(log, "\n{:?}\n", backtrace).expect(oops);
