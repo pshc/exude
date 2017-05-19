@@ -13,6 +13,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use cargo::Output;
@@ -23,14 +25,15 @@ mod errors {
         links {
             Issuer(::issuer::Error, ::issuer::ErrorKind);
         }
-        errors { BuildError }
+        errors { BuildError Cancelled }
     }
 }
 
 fn main() {
     match run() {
         Ok(()) => (),
-        Err(Error(ErrorKind::BuildError, _)) => process::exit(1),
+        Err(Error(ErrorKind::BuildError, _)) |
+        Err(Error(ErrorKind::Cancelled, _)) => process::exit(1),
         Err(e) => {
             let stderr = io::stderr();
             let oops = "couldn't write to stderr";
@@ -82,7 +85,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
             .manifest_path(&manifest)
             .features(&["gl"])
             .spawn("build")?;
-        let artifact = process_build(stream, "g", false)?;
+        let artifact = process_build(stream, "g", false, None)?;
         if artifact.fresh {
             println!("       Fresh G");
         } else {
@@ -96,8 +99,9 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
         }
     }
 
-    // Client thread
+    let client_switch = DeadMansSwitch::new();
     let client_thread = {
+        let cancel_flag = client_switch.0.clone();
         let stream = cargo::Command::new()
             .manifest_path(&config.client_manifest())
             .bin_only("client")
@@ -105,7 +109,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
 
         thread::spawn(
             move || -> Result<()> {
-                let artifact = process_build(stream, "client", true)?;
+                let artifact = process_build(stream, "client", true, Some(&cancel_flag))?;
                 if artifact.fresh {
                     println!("       Fresh client");
                 } else {
@@ -121,7 +125,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
         let stream = cargo::Command::new()
             .manifest_path(&config.driver_manifest())
             .spawn("build")?;
-        let artifact = process_build(stream, "driver", false)?;
+        let artifact = process_build(stream, "driver", false, None)?;
         if artifact.fresh {
             println!("       Fresh driver");
         } else {
@@ -131,6 +135,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
     }
 
     client_thread.join().expect("client thread")?;
+    drop(client_switch);
 
     Ok(())
 }
@@ -145,12 +150,16 @@ fn process_build(
     stream: cargo::JsonStream,
     name: &str,
     bin: bool,
+    kill_switch: Option<&AtomicBool>,
 ) -> Result<Artifact> {
 
     let mut output = None;
     let mut errored = false;
 
     for line in stream {
+        if kill_switch.map(|b| b.load(Ordering::Relaxed)).unwrap_or(false) {
+            return Err(ErrorKind::Cancelled.into())
+        }
         let line = line?;
         let e = match line.decode() {
             Ok(Output::Artifact(artifact)) => {
@@ -215,5 +224,20 @@ fn touch(path: &Path) -> io::Result<()> {
             "time travel"
         };
         Err(io::Error::new(io::ErrorKind::Other, msg))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct DeadMansSwitch(pub Arc<AtomicBool>);
+
+impl DeadMansSwitch {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
+impl Drop for DeadMansSwitch {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed)
     }
 }
