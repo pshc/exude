@@ -265,7 +265,7 @@ impl<'a> Command<'a> {
         let mut spawner = process::Command::new("cargo");
         spawner
             .stdin(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .stdout(Stdio::piped())
             .args(&[cmd, "--message-format", "json"]);
 

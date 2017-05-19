@@ -82,11 +82,11 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
             .manifest_path(&manifest)
             .features(&["gl"])
             .spawn("build")?;
-        let artifact = process_build(stream, "g", false, &config.root)?;
+        let artifact = process_build(stream, "g", false)?;
         if artifact.fresh {
-            println!("G is still fresh.");
+            println!("       Fresh G");
         } else {
-            println!("Rebuilt G.");
+            println!("     Rebuilt G");
             // make sure driver and client get rebuilt
             touch(&config.root.join("client/src/main.rs"))
                 .chain_err(|| "touch client/src/main.rs")?;
@@ -98,7 +98,6 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
 
     // Client thread
     let client_thread = {
-        let client_config = config.clone();
         let stream = cargo::Command::new()
             .manifest_path(&config.client_manifest())
             .bin_only("client")
@@ -106,12 +105,11 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
 
         thread::spawn(
             move || -> Result<()> {
-                let config = client_config;
-                let artifact = process_build(stream, "client", true, &config.root)?;
+                let artifact = process_build(stream, "client", true)?;
                 if artifact.fresh {
-                    println!("Client is fresh.");
+                    println!("       Fresh client");
                 } else {
-                    println!("Rebuilt client.");
+                    println!("     Rebuilt client");
                 }
                 Ok(())
             }
@@ -123,12 +121,12 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
         let stream = cargo::Command::new()
             .manifest_path(&config.driver_manifest())
             .spawn("build")?;
-        let artifact = process_build(stream, "driver", false, &config.root)?;
+        let artifact = process_build(stream, "driver", false)?;
         if artifact.fresh {
-            println!("Driver is fresh.");
+            println!("       Fresh driver");
         } else {
             issuer::sign(&artifact.path, keys, &config.root)?;
-            println!("Rebuilt and signed driver.");
+            println!("  Signed new driver");
         }
     }
 
@@ -147,14 +145,7 @@ fn process_build(
     stream: cargo::JsonStream,
     name: &str,
     bin: bool,
-    root: &Path,
 ) -> Result<Artifact> {
-
-    let print_src = |target: &cargo::Target| {
-        let src = target.src_path;
-        let src = src.strip_prefix(&root).unwrap_or(src);
-        println!("{}", src.display());
-    };
 
     let mut output = None;
     let mut errored = false;
@@ -163,9 +154,6 @@ fn process_build(
         let line = line?;
         let e = match line.decode() {
             Ok(Output::Artifact(artifact)) => {
-                if !artifact.fresh {
-                    print_src(&artifact.target);
-                }
                 if artifact.target.name == name && artifact.target.kind.is_bin() == bin {
                     assert!(output.is_none(), "target {} seen twice", name);
                     assert!(
@@ -183,16 +171,13 @@ fn process_build(
                 continue;
             }
             Ok(Output::Message(diag)) => {
-                print!("{} in ", diag.message.level);
-                print_src(&diag.target);
-                println!(" -> {}", diag.message.message);
                 if diag.message.level.is_show_stopper() {
                     errored = true;
                 }
                 continue;
             }
             Ok(Output::BuildStep(b)) => {
-                println!("build step {}", b.package_id);
+                println!("  Build step {}", b.package_id);
                 continue;
             }
             Err(e) => e,
