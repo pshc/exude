@@ -215,12 +215,8 @@ impl HashedHeapFile {
         let HashedHeapFile(buf, info) = self;
         assert!(buf.len() < handshake::INLINE_MAX);
         let resp = handshake::Welcome::InlineDriver(info);
-        let coded = match Bincoded::new(&resp) {
-            Ok(b) => b,
-            Err(e) => return box future::err(e.into()),
-        };
 
-        box common::write_with_length(w, coded)
+        box common::write_bincoded(w, &resp)
                 .and_then(
             move |(w, _)| {
                 tokio_io::io::write_all(w, buf)
