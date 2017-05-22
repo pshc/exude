@@ -1,5 +1,6 @@
 //! Spawns cargo sub-commands and parses its JSON output.
 
+use std::borrow::Cow;
 use std::cmp;
 use std::io::{self, BufRead, BufReader, Write};
 use std::mem;
@@ -12,6 +13,7 @@ use terminal_size::terminal_size;
 
 use errors::*;
 pub use self::diagnostic::Diagnostic;
+pub use self::target::Kind;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "reason")]
@@ -38,17 +40,24 @@ pub struct Artifact<'a> {
     pub features: Vec<&'a str>,
     pub filenames: Vec<&'a Path>,
     pub fresh: bool,
-    pub package_id: &'a str,
+    #[serde(borrow)]
+    pub package_id: Cow<'a, str>,
+    #[serde(borrow)]
     pub profile: Profile<'a>,
+    #[serde(borrow)]
     pub target: Target<'a>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BuildStep<'a> {
-    pub cfgs: Vec<&'a str>,
-    pub linked_libs: Vec<&'a str>,
-    pub linked_paths: Vec<&'a str>,
-    pub package_id: &'a str,
+    #[serde(borrow)]
+    pub cfgs: Vec<Cow<'a, str>>,
+    #[serde(borrow)]
+    pub linked_libs: Vec<Cow<'a, str>>,
+    #[serde(borrow)]
+    pub linked_paths: Vec<&'a Path>,
+    #[serde(borrow)]
+    pub package_id: Cow<'a, str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,8 +72,10 @@ pub struct Profile<'a> {
 #[derive(Debug, Deserialize)]
 pub struct Target<'a> {
     pub crate_types: Vec<&'a str>,
-    pub kind: self::target::Kind<'a>,
-    pub name: &'a str,
+    pub kind: Kind<'a>,
+    #[serde(borrow)]
+    pub name: Cow<'a, str>,
+    #[serde(borrow)]
     pub src_path: &'a Path,
 }
 
@@ -132,28 +143,39 @@ pub mod target {
 
 #[derive(Debug, Deserialize)]
 pub struct Message<'a> {
+    #[serde(borrow)]
     pub message: Diagnostic<'a>,
-    pub package_id: &'a str,
+    #[serde(borrow)]
+    pub package_id: Cow<'a, str>,
+    #[serde(borrow)]
     pub target: Target<'a>,
 }
 
 pub mod diagnostic {
+    use std::borrow::Cow;
     use std::fmt;
+    use std::path::Path;
 
     #[derive(Debug, Deserialize)]
     pub struct Diagnostic<'a> {
-        pub message: &'a str,
+        #[serde(borrow)]
+        pub message: Cow<'a, str>,
+        #[serde(borrow)]
         pub code: Option<Code<'a>>,
         pub level: Level,
+        #[serde(borrow)]
         pub spans: Vec<Span<'a>>,
+        #[serde(borrow)]
         pub children: Vec<Diagnostic<'a>>,
-        pub rendered: Option<&'a str>,
+        #[serde(borrow)]
+        pub rendered: Option<Cow<'a, str>>,
     }
 
     #[derive(Debug, Deserialize)]
     pub struct Code<'a> {
         pub code: &'a str,
-        pub explanation: Option<&'a str>,
+        #[serde(borrow)]
+        pub explanation: Option<Cow<'a, str>>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -197,32 +219,40 @@ pub mod diagnostic {
 
     #[derive(Debug, Deserialize)]
     pub struct Span<'a> {
-        pub file_name: &'a str,
+        #[serde(borrow)]
+        pub file_name: &'a Path,
         pub byte_start: u32,
         pub byte_end: u32,
         pub line_start: u32,
         pub line_end: u32,
         pub column_start: u32,
         pub column_end: u32,
-
         pub is_primary: bool,
+        #[serde(borrow)]
         pub text: Vec<SpanLine<'a>>,
-        pub label: Option<&'a str>,
-        pub suggested_replacement: Option<&'a str>,
+        #[serde(borrow)]
+        pub label: Option<Cow<'a, str>>,
+        #[serde(borrow)]
+        pub suggested_replacement: Option<Cow<'a, str>>,
+        #[serde(borrow)]
         pub expansion: Option<Box<SpanMacroExpansion<'a>>>,
     }
 
     #[derive(Debug, Deserialize)]
     pub struct SpanLine<'a> {
-        pub text: &'a str,
+        #[serde(borrow)]
+        pub text: Cow<'a, str>,
         pub highlight_start: usize,
         pub highlight_end: usize,
     }
 
     #[derive(Debug, Deserialize)]
     pub struct SpanMacroExpansion<'a> {
+        #[serde(borrow)]
         span: Span<'a>,
-        macro_decl_name: &'a str,
+        #[serde(borrow)]
+        macro_decl_name: Cow<'a, str>,
+        #[serde(borrow)]
         def_site_span: Option<Span<'a>>,
     }
 }
