@@ -174,15 +174,9 @@ impl HashedHeapFile {
         let ref bin_path = root.join("latest.bin");
         let ref meta_path = root.join("latest.meta");
 
-        let mut meta_vec = Vec::new();
-        let n = File::open(meta_path)
-            .and_then(|mut f| f.read_to_end(&mut meta_vec))
-            .chain_err(|| format!("couldn't open metadata ({})", meta_path.display()))?;
-        if n == 0 {
-            bail!("metadata was empty");
-        }
         let info: DriverInfo =
-            unsafe { Bincoded::from_vec(meta_vec) }
+            unsafe { Bincoded::from_path(meta_path) }
+                .chain_err(|| format!("couldn't open metadata ({})", meta_path.display()))?
                 .deserialize()
                 .chain_err(|| format!("couldn't decode metadata ({})", meta_path.display()))?;
         let len = info.len;

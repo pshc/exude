@@ -182,13 +182,7 @@ pub fn sign(driver_path: &Path, keys: &InsecureKeys, out_dir: &Path) -> Result<(
             .chain_err(|| "driver metadata encoding issue")?;
 
         let descriptor_path = out_dir.join("latest.meta");
-        File::create(descriptor_path)
-            .and_then(
-                |mut file| {
-                    file.write_all(bincoded.as_ref())?;
-                    file.sync_all()
-                }
-            )
+        bincoded.write_to_path(&descriptor_path)
             .chain_err(|| "couldn't write metadata")?;
     }
 
