@@ -159,6 +159,7 @@ fn process_build(
 
     let mut output = None;
     let mut errored = false;
+    let mut logged_json = false;
 
     for line in stream {
         if kill_switch.map(|b| b.load(Ordering::Relaxed)).unwrap_or(false) {
@@ -195,7 +196,13 @@ fn process_build(
             }
             Err(e) => e,
         };
-        cargo::log_json_error(&e, line);
+
+        if logged_json {
+            writeln!(io::stderr(), "While parsing JSON:\n    {}\n", e).expect("stderr");
+        } else {
+            cargo::log_json_error(&e, line);
+            logged_json = true;
+        }
     }
 
     if errored {
