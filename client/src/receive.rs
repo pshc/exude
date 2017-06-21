@@ -66,31 +66,28 @@ fn verify_and_save<R: AsyncRead + 'static>(
             .then(|res| res.chain_err(|| "couldn't receive inline driver"))
             .and_then(
         |(reader, buf)| {
-            let future = future::lazy(
-                move || -> Result<_> {
-                    let checked_digest = utils::digest_from_bytes(&buf[..]);
-                    ensure!(info.digest == checked_digest, "hash check failed");
-
-                    let sig = sign::Signature(info.sig.0);
-                    let verified = sign::verify_detached(&sig, &info.digest.0, &PUBLIC_KEY);
-                    ensure!(verified, "sig check failed");
-
-                    File::create(&path)
-                        .and_then(
-                            |mut file| {
-                                file.write_all(&buf)?;
-                                file.sync_data()
-                            }
-                        )
-                        .chain_err(|| "couldn't store driver in repo")?;
-
-                    Ok((info, path))
-                }
-            );
-
             CpuPool::new(1)
-                // todo use `spawn_fn`
-                .spawn(future)
+                .spawn_fn(
+                    move || -> Result<_> {
+                        let checked_digest = utils::digest_from_bytes(&buf[..]);
+                        ensure!(info.digest == checked_digest, "hash check failed");
+
+                        let sig = sign::Signature(info.sig.0);
+                        let verified = sign::verify_detached(&sig, &info.digest.0, &PUBLIC_KEY);
+                        ensure!(verified, "sig check failed");
+
+                        File::create(&path)
+                            .and_then(
+                                |mut file| {
+                                    file.write_all(&buf)?;
+                                    file.sync_data()
+                                }
+                            )
+                            .chain_err(|| "couldn't store driver in repo")?;
+
+                        Ok((info, path))
+                    }
+                )
                 .map(|(info, path)| (reader, info, path))
         }
     )
