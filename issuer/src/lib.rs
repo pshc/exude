@@ -170,8 +170,8 @@ pub fn sign(driver_path: &Path, keys: &InsecureKeys, out_dir: &Path) -> Result<(
     println!("Hashing driver...");
     let digest = digest_from_bytes(&driver_bytes);
 
-    println!("Signing driver...");
-    let sig = Signature(sign::sign_detached(&driver_bytes, &keys.1).0);
+    println!("Signing driver hash...");
+    let sig = Signature(sign::sign_detached(&digest.0, &keys.1).0);
 
     // write unsigned metadata
     // How do we prevent people from using old sigs to distribute old buggy drivers?
@@ -204,6 +204,33 @@ pub fn sign(driver_path: &Path, keys: &InsecureKeys, out_dir: &Path) -> Result<(
     Ok(())
 }
 
+/// Verifies the output of `sign`.
+pub fn verify(pk: &sign::PublicKey, dir: &Path) -> Result<()> {
+    assert!(sodiumoxide::init());
+
+    let ref bin_path = dir.join("latest.bin");
+    let ref meta_path = dir.join("latest.meta");
+
+    let (digest, len) = File::open(bin_path)
+        .and_then(digest_from_read)
+        .chain_err(|| format!("could not hash driver ({})", bin_path.display()))?;
+
+    let info: DriverInfo =
+        unsafe { Bincoded::from_path(meta_path) }
+            .chain_err(|| format!("couldn't open metadata ({})", meta_path.display()))?
+            .deserialize()
+            .chain_err(|| format!("couldn't read metadata ({})", meta_path.display()))?;
+
+    ensure!(info.len == len, "incorrect driver length");
+    ensure!(info.digest == digest, "mismatched driver digest");
+
+    let sig = sign::Signature(info.sig.0);
+    let verified = sign::verify_detached(&sig, &info.digest.0, pk);
+    ensure!(verified, "invalid driver signature");
+
+    Ok(())
+}
+
 fn digest_from_bytes(bytes: &[u8]) -> Digest {
     use digest::{Input, VariableOutput};
 
@@ -212,6 +239,30 @@ fn digest_from_bytes(bytes: &[u8]) -> Digest {
     let mut result = [0u8; proto::digest::LEN];
     hasher.variable_result(&mut result).expect("hashing");
     Digest(result)
+}
+
+fn digest_from_read<R: Read>(mut reader: R) -> io::Result<(Digest, usize)> {
+    use digest::{Input, VariableOutput};
+
+    let mut hasher = Shake128::default();
+    let mut buf = [0; 4096];
+    let mut len = 0;
+
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                len += n;
+                hasher.digest(&buf[..n]);
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => (),
+            Err(e) => return Err(e),
+        }
+    }
+
+    let mut result = [0u8; proto::digest::LEN];
+    hasher.variable_result(&mut result).expect("hashing");
+    Ok((Digest(result), len))
 }
 
 pub mod secret {

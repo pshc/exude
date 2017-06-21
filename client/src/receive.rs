@@ -57,8 +57,7 @@ fn verify_and_save<R: AsyncRead + 'static>(
     let hex = info.digest.hex_bytes();
     path.push(unsafe { str::from_utf8_unchecked(&hex) });
 
-    // xxx not a fan of reading the whole thing into memory... we could mmap?
-    // or if we had a streaming version of `sign::verify_detached`, we could stream
+    // xxx stream into hasher
     let mut buf = Vec::with_capacity(len);
     unsafe {
         buf.set_len(len);
@@ -72,9 +71,8 @@ fn verify_and_save<R: AsyncRead + 'static>(
                     let checked_digest = utils::digest_from_bytes(&buf[..]);
                     ensure!(info.digest == checked_digest, "hash check failed");
 
-                    // we *could* parallelize this with hashing...
                     let sig = sign::Signature(info.sig.0);
-                    let verified = sign::verify_detached(&sig, &buf, &PUBLIC_KEY);
+                    let verified = sign::verify_detached(&sig, &info.digest.0, &PUBLIC_KEY);
                     ensure!(verified, "sig check failed");
 
                     File::create(&path)

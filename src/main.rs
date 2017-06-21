@@ -131,6 +131,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
             .spawn("build")?;
         let artifact = process_build(stream, "driver", false, None)?;
         if artifact.fresh {
+            issuer::verify(&keys.0, &config.root)?;
             println!("       Fresh driver");
         } else {
             issuer::sign(&artifact.path, keys, &config.root)?;
