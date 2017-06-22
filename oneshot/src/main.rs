@@ -93,9 +93,8 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
                     let (reader, writer) = sock.split();
 
                     let greeting = {
-                        // TEMP we should have like `handshake::Hello::RequireVersion` to indicate our intent?
-                        let cached_driver = Some(Digest::zero()); // TEMP
-                        let hello = handshake::Hello(cached_driver);
+                        let cached_driver = Digest::zero(); // TEMP
+                        let hello = handshake::Hello::Oneshot(cached_driver);
                         common::write_bincoded(writer, &hello)
                             .and_then(|(w, _)| Ok(w))
                     };

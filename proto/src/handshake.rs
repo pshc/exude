@@ -16,9 +16,14 @@ pub struct DriverInfo {
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Welcome {
     Current,
+    Obsolete,
     InlineDriver(DriverInfo),
     DownloadDriver(String, DriverInfo),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Hello(pub Option<Digest>);
+pub enum Hello {
+    Newbie,
+    Cached(Digest),
+    Oneshot(Digest),
+}

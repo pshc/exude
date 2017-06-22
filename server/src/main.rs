@@ -13,7 +13,7 @@ mod common;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use futures::{Future, IntoFuture, Stream, future};
@@ -106,17 +106,22 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item = (), Erro
     box hello
             .and_then(
         move |(r, hello)| -> OurFuture<_> {
+            use handshake::Hello::*;
+            use handshake::Welcome::{Current, Obsolete};
             println!("{} is here: {:?}", addr, hello);
+            let info = try_box!(read_latest_metadata());
 
             match hello {
-                handshake::Hello(None) => {
+                Cached(ref d) | Oneshot(ref d) if d == &info.digest => {
+                    box common::write_bincoded(w, &Current).and_then(|(w, _)| Ok((r, w)))
+                }
+                Newbie | Cached(_) => {
                     // send them the up-to-date driver
-                    let driver = try_box!(HashedHeapFile::read_latest());
+                    let driver = try_box!(HashedHeapFile::from_metadata(info));
                     box driver.write_to(w).and_then(move |w| Ok((r, w)))
                 }
-                handshake::Hello(Some(_digest)) => {
-                    // check if digest is up-to-date; if not, send delta
-                    unimplemented!()
+                Oneshot(_) => {
+                    box common::write_bincoded(w, &Obsolete).and_then(|(w, _)| Ok((r, w)))
                 }
             }
         }
@@ -162,33 +167,49 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item = (), Erro
     )
 }
 
+fn read_latest_metadata() -> Result<DriverInfo> {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop();
+    path.push("latest.meta");
+    read_metadata(&path)
+}
+
+fn read_metadata(path: &Path) -> Result<DriverInfo> {
+    let mut vec = Vec::new();
+    let n = File::open(path)
+        .and_then(|mut f| f.read_to_end(&mut vec))
+        .chain_err(|| format!("couldn't open metadata ({})", path.display()))?;
+    if n == 0 {
+        bail!("metadata was empty");
+    }
+    let info: DriverInfo =
+        unsafe { Bincoded::from_vec(vec) }
+            .deserialize()
+            .chain_err(|| format!("couldn't decode metadata ({})", path.display()))?;
+    Ok(info)
+}
+
 /// The bytes and hash digest of a file stored on the heap.
 #[derive(Debug)]
 struct HashedHeapFile(Vec<u8>, DriverInfo);
 
 impl HashedHeapFile {
-    /// Read the latest signed driver into memory.
-    fn read_latest() -> Result<Self> {
+    /// Read the signed driver into memory.
+    fn from_metadata(info: DriverInfo) -> Result<Self> {
         let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         root.pop();
+        // presumably we would look up by digest into the repo here
         let ref bin_path = root.join("latest.bin");
-        let ref meta_path = root.join("latest.meta");
 
-        let info: DriverInfo =
-            unsafe { Bincoded::from_path(meta_path) }
-                .chain_err(|| format!("couldn't open metadata ({})", meta_path.display()))?
-                .deserialize()
-                .chain_err(|| format!("couldn't decode metadata ({})", meta_path.display()))?;
         let len = info.len;
-
-        assert!(info.len <= handshake::INLINE_MAX);
+        assert!(len <= handshake::INLINE_MAX);
         let mut driver_buf = Vec::with_capacity(len);
-        unsafe {
-            driver_buf.set_len(len);
-        }
         let eof = File::open(bin_path)
             .and_then(
                 |mut bin| {
+                    unsafe {
+                        driver_buf.set_len(len);
+                    }
                     bin.read_exact(&mut driver_buf)?;
                     Ok(bin.read(&mut [0])? == 0)
                 }

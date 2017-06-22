@@ -23,6 +23,9 @@ pub fn fetch_driver<R: AsyncRead + 'static>(reader: R) -> OurFuture<(R, Box<Driv
 
             match welcome {
                 handshake::Welcome::Current => unimplemented!(),
+                handshake::Welcome::Obsolete => {
+                    box future::err("obsolete; please install a new client manually".into())
+                }
                 handshake::Welcome::InlineDriver(info) => {
                     println!(
                         "receiving driver {} ({}kb)",

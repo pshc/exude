@@ -89,8 +89,7 @@ fn client(server_addr: SocketAddr) -> Result<()> {
                         let (reader, writer) = sock.split();
 
                         let greeting = {
-                            let cached_driver = None;
-                            let hello = handshake::Hello(cached_driver);
+                            let hello = handshake::Hello::Newbie;
                             common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
                         };
 
