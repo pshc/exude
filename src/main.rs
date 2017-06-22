@@ -34,8 +34,6 @@ fn main() {
     let mut stderr = io::stderr();
     match run() {
         Ok(()) => (),
-        Err(Error(ErrorKind::BuildError, _)) |
-        Err(Error(ErrorKind::Cancelled, _)) => process::exit(1),
         Err(Error(ErrorKind::Issuer(issuer::ErrorKind::InvalidPassword), _)) => {
             writeln!(stderr, "Invalid encryption password.").expect(oops);
             process::exit(1);
@@ -60,7 +58,24 @@ fn run() -> Result<()> {
         root: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
     };
     let keys = issuer::load_keys()?;
-    build(&config, &keys)
+
+    let mut input = format!("\n");
+    while input != "" && input != "q\n" {
+
+        match build(&config, &keys) {
+            Ok(()) => (),
+            Err(Error(ErrorKind::BuildError, _)) |
+            Err(Error(ErrorKind::Cancelled, _)) => (),
+            e => return e
+        }
+
+        print!("> ");
+        io::stdout().flush().expect("flush");
+        input.clear();
+        io::stdin().read_line(&mut input).chain_err(|| "stdin")?;
+    }
+
+    Ok(())
 }
 
 #[derive(Clone)]
