@@ -158,6 +158,9 @@ fn process_build(
     kill_switch: Option<&AtomicBool>,
 ) -> Result<Artifact> {
 
+    let mut stderr = io::stderr();
+    let oops = "couldn't write to stderr";
+
     let mut output = None;
     let mut errored = false;
     let mut logged_json = false;
@@ -185,10 +188,29 @@ fn process_build(
                 }
                 continue;
             }
-            Ok(Output::Message(diag)) => {
-                if diag.message.level.is_show_stopper() {
+            Ok(Output::Message(msg)) => {
+                let diag = msg.message;
+                if diag.level.is_show_stopper() {
                     errored = true;
                 }
+                let mut out = stderr.lock();
+                write!(out, "{}", diag.level).expect(oops);
+                if let Some(code) = diag.code {
+                    write!(out, "[{}]", code.code).expect(oops);
+                }
+                writeln!(out, ": {}", diag.message).expect(oops);
+                if !diag.spans.is_empty() {
+                    // probably want to search for the span where .is_primary
+                    let ref span = diag.spans[0];
+                    writeln!(
+                        out,
+                        "   --> {}:{}:{}",
+                        span.file_name.display(),
+                        span.line_start,
+                        span.column_start
+                    ).expect(oops);
+                }
+                writeln!(out, "").expect(oops);
                 continue;
             }
             Ok(Output::BuildStep(b)) => {
@@ -199,7 +221,7 @@ fn process_build(
         };
 
         if logged_json {
-            writeln!(io::stderr(), "While parsing JSON:\n    {}\n", e).expect("stderr");
+            writeln!(stderr, "While parsing JSON:\n    {}\n", e).expect(oops);
         } else {
             cargo::log_json_error(&e, line);
             logged_json = true;
