@@ -140,7 +140,7 @@ pub mod utils {
         let before = Instant::now();
 
         let mut hasher = Shake128::default();
-        hasher.digest(bytes);
+        hasher.process(bytes);
         let mut result = [0u8; digest::LEN];
         hasher.variable_result(&mut result).expect("hashing");
         let digest = Digest(result);

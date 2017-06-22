@@ -235,7 +235,7 @@ fn digest_from_bytes(bytes: &[u8]) -> Digest {
     use digest::{Input, VariableOutput};
 
     let mut hasher = Shake128::default();
-    hasher.digest(bytes);
+    hasher.process(bytes);
     let mut result = [0u8; proto::digest::LEN];
     hasher.variable_result(&mut result).expect("hashing");
     Digest(result)
@@ -253,7 +253,7 @@ fn digest_from_read<R: Read>(mut reader: R) -> io::Result<(Digest, usize)> {
             Ok(0) => break,
             Ok(n) => {
                 len += n;
-                hasher.digest(&buf[..n]);
+                hasher.process(&buf[..n]);
             }
             Err(ref e) if e.kind() == io::ErrorKind::Interrupted => (),
             Err(e) => return Err(e),

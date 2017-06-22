@@ -9,14 +9,14 @@ doc = false
 name = "client"
 
 [dependencies]
-digest = "0.5"
+digest = "0.6"
 error-chain = "0.10.0"
 futures = "0.1"
 futures-cpupool = "0.1"
 libloading = "0.4.0"
 rental = "0.4.8"
-sha3 = "0.5"
-sodiumoxide = "0.0.14"
+sha3 = "0.6"
+sodiumoxide = "0.0.15"
 tokio-core = "0.1"
 tokio-io = "0.1"
 
