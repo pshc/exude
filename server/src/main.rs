@@ -15,11 +15,14 @@ use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::rc::Rc;
 
-use futures::{Future, IntoFuture, Stream, future};
+use futures::future::{self, Future, IntoFuture, Loop};
+use futures::stream::Stream;
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
 use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_io::io::{ReadHalf, WriteHalf};
 
 use common::OurFuture;
 use proto::{Bincoded, DriverInfo, api, handshake};
@@ -87,7 +90,12 @@ fn serve(addr: &SocketAddr) -> Result<()> {
         .incoming()
         .for_each(
             |(sock, addr)| {
-                handle.spawn(serve_client(sock, addr));
+                let (r, w) = sock.split();
+                let client = Rc::new(ClientShared {
+                    addr,
+                });
+                let io = ClientIO { r, w, client };
+                handle.spawn(serve_client(io));
                 Ok(())
             }
         );
@@ -95,58 +103,58 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     core.run(server).chain_err(|| "core listener failed")
 }
 
-fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item = (), Error = ()>> {
-    use futures::future::{Loop, loop_fn};
+struct ClientIO {
+    r: ReadHalf<TcpStream>,
+    w: WriteHalf<TcpStream>,
+    client: Rc<ClientShared>,
+}
 
-    println!("new client from {}", addr);
+struct ClientShared {
+    addr: SocketAddr,
+}
 
-    let (r, w) = sock.split();
+fn serve_client(io: ClientIO) -> Box<Future<Item = (), Error = ()>> {
+    let ClientIO { r, w, client } = io;
+    println!("new client from {}", client.addr);
+
     let hello = common::read_bincoded(r);
+    let client_rc2 = client.clone();
 
     box hello
             .and_then(
         move |(r, hello)| -> OurFuture<_> {
             use handshake::Hello::*;
             use handshake::Welcome::{Current, Obsolete};
-            println!("{} is here: {:?}", addr, hello);
+            println!("{} is here: {:?}", client.addr, hello);
             let info = try_box!(read_latest_metadata());
 
-            match hello {
+            let write: OurFuture<_> = match hello {
                 Cached(ref d) | Oneshot(ref d) if d == &info.digest => {
-                    box common::write_bincoded(w, &Current).and_then(|(w, _)| Ok((r, w)))
+                    box common::write_bincoded(w, &Current).map(|(w, _)| w)
                 }
                 Newbie | Cached(_) => {
                     // send them the up-to-date driver
                     let driver = try_box!(HashedHeapFile::from_metadata(info));
-                    box driver.write_to(w).and_then(move |w| Ok((r, w)))
+                    driver.write_to(w)
                 }
-                Oneshot(_) => {
-                    box common::write_bincoded(w, &Obsolete).and_then(|(w, _)| Ok((r, w)))
-                }
-            }
+                Oneshot(_) => box common::write_bincoded(w, &Obsolete).map(|(w, _)| w),
+            };
+
+            box write.map(|w| ClientIO { r, w, client })
         }
     )
             .and_then(
-        move |rw| {
+        move |io| {
 
-            loop_fn(
-                rw, move |(r, w)| {
+            future::loop_fn(
+                io, move |io| {
 
+                    let ClientIO { r, w, client } = io;
                     let read_req = common::read_bincoded(r);
                     let dispatch_req = read_req.and_then(
                         move |(r, req)| -> OurFuture<_> {
-                            match req {
-                                api::UpRequest::Ping(n) => {
-                                    println!("{} pinged ({})", addr, n);
-
-                                    box common::write_bincoded(w, &api::DownResponse::Pong(n))
-                                            .and_then(move |(w, _)| Ok(Loop::Continue((r, w))))
-                                }
-                                api::UpRequest::Bye => {
-                                    println!("{} says bye", addr);
-                                    box future::ok(Loop::Break(()))
-                                }
-                            }
+                            let io = ClientIO { r, w, client };
+                            io.handle_request(req)
                         }
                     );
 
@@ -159,12 +167,33 @@ fn serve_client(sock: TcpStream, addr: SocketAddr) -> Box<Future<Item = (), Erro
             .map(|_r| ())
             .map_err(
         move |err| {
-            println!("{} error: {}", addr, err);
+            let client = client_rc2;
+            println!("{} error: {}", client.addr, err);
             for e in err.iter().skip(1) {
                 println!("  caused by: {}", e);
             }
         }
     )
+}
+
+impl ClientIO {
+    fn handle_request(self, req: api::UpRequest) -> OurFuture<future::Loop<(), Self>> {
+        use api::UpRequest::*;
+        let ClientIO { r, w, client } = self;
+
+        match req {
+            Ping(n) => {
+                println!("{} pinged ({})", client.addr, n);
+
+                box common::write_bincoded(w, &api::DownResponse::Pong(n))
+                        .and_then(move |(w, _)| Ok(Loop::Continue(ClientIO { r, w, client })))
+            }
+            Bye => {
+                println!("{} says bye", client.addr);
+                box future::ok(Loop::Break(()))
+            }
+        }
+    }
 }
 
 fn read_latest_metadata() -> Result<DriverInfo> {
