@@ -120,7 +120,7 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
             );
 
             match core.run(client) {
-                Ok((_r, _w)) => println!("net: donezo"),
+                Ok(()) => println!("net: donezo"),
                 Err(e) => client::errors::display_net_thread_error(e).expect("net: stderr?"),
             }
         },
