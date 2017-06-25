@@ -10,6 +10,8 @@ extern crate tokio_io;
 
 mod common;
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
@@ -17,8 +19,9 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::rc::Rc;
 
-use futures::future::{self, Future, IntoFuture, Loop};
-use futures::stream::Stream;
+use futures::future::{self, Future, IntoFuture};
+use futures::stream::{self, Stream};
+use futures::unsync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::Core;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -26,11 +29,12 @@ use tokio_io::io::{ReadHalf, WriteHalf};
 
 use common::OurFuture;
 use proto::{Bincoded, DriverInfo, api, handshake};
+use proto::serde::Serialize;
 
 mod errors {
     use proto;
     error_chain! {
-        errors { AlreadyRunning }
+        errors { AlreadyRunning GracefulDisconnect }
         foreign_links {
             Bincode(proto::bincoded::Error);
         }
@@ -86,15 +90,23 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     };
     println!("Listening on: {}", addr);
 
+    let clients: Rc<RefCell<BTreeMap<u32, Rc<ClientEntry>>>> = Default::default();
+    let mut client_ctr = 0u32;
+
     let server = listener
         .incoming()
         .for_each(
             |(sock, addr)| {
+                client_ctr += 1;
+                let id = client_ctr;
+
+                let (outbox_tx, outbox_rx) = unbounded();
+
+                let entry = Rc::new(ClientEntry { addr, outbox_tx });
+                clients.borrow_mut().insert(id, entry.clone());
+
                 let (r, w) = sock.split();
-                let client = Rc::new(ClientShared {
-                    addr,
-                });
-                let io = ClientIO { r, w, client };
+                let io = ClientIO { r, w, client: entry, outbox_rx };
                 handle.spawn(serve_client(io));
                 Ok(())
             }
@@ -103,19 +115,24 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     core.run(server).chain_err(|| "core listener failed")
 }
 
+/// Stored in the table of clients.
+struct ClientEntry {
+    addr: SocketAddr,
+    outbox_tx: UnboundedSender<Vec<u8>>,
+}
+
+/// Passed around in the request handling code.
 struct ClientIO {
     r: ReadHalf<TcpStream>,
     w: WriteHalf<TcpStream>,
-    client: Rc<ClientShared>,
-}
-
-struct ClientShared {
-    addr: SocketAddr,
+    client: Rc<ClientEntry>,
+    outbox_rx: UnboundedReceiver<Vec<u8>>,
 }
 
 fn serve_client(io: ClientIO) -> Box<Future<Item = (), Error = ()>> {
-    let ClientIO { r, w, client } = io;
-    println!("new client from {}", client.addr);
+    let ClientIO { r, w, client, outbox_rx } = io;
+    let addr = client.addr;
+    println!("new client from {}", addr);
 
     let hello = common::read_bincoded(r);
     let client_rc2 = client.clone();
@@ -125,7 +142,7 @@ fn serve_client(io: ClientIO) -> Box<Future<Item = (), Error = ()>> {
         move |(r, hello)| -> OurFuture<_> {
             use handshake::Hello::*;
             use handshake::Welcome::{Current, Obsolete};
-            println!("{} is here: {:?}", client.addr, hello);
+            println!("{} is here: {:?}", addr, hello);
             let info = try_box!(read_latest_metadata());
 
             let write: OurFuture<_> = match hello {
@@ -137,31 +154,33 @@ fn serve_client(io: ClientIO) -> Box<Future<Item = (), Error = ()>> {
                     let driver = try_box!(HashedHeapFile::from_metadata(info));
                     driver.write_to(w)
                 }
-                Oneshot(_) => box common::write_bincoded(w, &Obsolete).map(|(w, _)| w),
+                Oneshot(digest) => {
+                    box common::write_bincoded(w, &Obsolete).and_then(
+                        move |_| {
+                            bail!("{} has an obsolete oneshot: {}", addr, digest)
+                        }
+                    )
+                }
             };
 
-            box write.map(|w| ClientIO { r, w, client })
+            box write.map(|w| (r, w))
         }
     )
             .and_then(
-        move |io| {
+        move |(r, w)| {
 
-            future::loop_fn(
-                io, move |io| {
+            fn swap<A, B>((a, b): (A, B)) -> (B, A) {
+                (b, a)
+            }
 
-                    let ClientIO { r, w, client } = io;
-                    let read_req = common::read_bincoded(r);
-                    let dispatch_req = read_req.and_then(
-                        move |(r, req)| -> OurFuture<_> {
-                            let io = ClientIO { r, w, client };
-                            io.handle_request(req)
-                        }
-                    );
+            let requests = stream::unfold(r, |r| Some(common::read_bincoded(r).map(swap)))
+                .for_each(move |req| client.handle_request(req));
 
-                    dispatch_req
-                }
-            )
+            let writes = outbox_rx
+                .map_err(|()| "UnboundedReceiver error".into())
+                .fold(w, |w, msg| common::write_with_length(w, msg).map(|(w, _)| w));
 
+            requests.join(writes).map(|_| ())
         }
     )
             .map(|_r| ())
@@ -176,23 +195,27 @@ fn serve_client(io: ClientIO) -> Box<Future<Item = (), Error = ()>> {
     )
 }
 
-impl ClientIO {
-    fn handle_request(self, req: api::UpRequest) -> OurFuture<future::Loop<(), Self>> {
+impl ClientEntry {
+    fn handle_request(&self, req: api::UpRequest) -> OurFuture<()> {
         use api::UpRequest::*;
-        let ClientIO { r, w, client } = self;
 
         match req {
             Ping(n) => {
-                println!("{} pinged ({})", client.addr, n);
-
-                box common::write_bincoded(w, &api::DownResponse::Pong(n))
-                        .and_then(move |(w, _)| Ok(Loop::Continue(ClientIO { r, w, client })))
+                println!("{} pinged ({})", self.addr, n);
+                box self.send(&api::DownResponse::Pong(n)).into_future()
             }
             Bye => {
-                println!("{} says bye", client.addr);
-                box future::ok(Loop::Break(()))
+                println!("{} says bye", self.addr);
+                box future::failed(ErrorKind::GracefulDisconnect.into())
             }
         }
+    }
+
+    fn send<T: Serialize>(&self, msg: &T) -> Result<()> {
+        let coded = Bincoded::new(msg)?;
+        self.outbox_tx
+            .send(coded.into())
+            .chain_err(|| "outbox_tx closed")
     }
 }
 
