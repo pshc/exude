@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use sha3::Shake128;
 use sodiumoxide::crypto::{pwhash, secretbox, sign};
 
-use proto::{Bincoded, Digest, DriverInfo, Signature};
+pub use proto::{Bincoded, Digest, DriverInfo, Signature};
 pub use secret::Secret;
 
 pub mod errors {
@@ -157,7 +157,7 @@ fn verify_keys(pk: &sign::PublicKey, sk: &sign::SecretKey) -> Result<()> {
     Ok(())
 }
 
-pub fn sign(driver_path: &Path, keys: &InsecureKeys, out_dir: &Path) -> Result<()> {
+pub fn sign(driver_path: &Path, keys: &InsecureKeys, out_dir: &Path) -> Result<DriverInfo> {
     assert!(sodiumoxide::init());
 
     println!("Reading driver: {}", driver_path.display());
@@ -176,8 +176,9 @@ pub fn sign(driver_path: &Path, keys: &InsecureKeys, out_dir: &Path) -> Result<(
     // write unsigned metadata
     // How do we prevent people from using old sigs to distribute old buggy drivers?
     // Expiry dates? Revocation?
+    let descriptor;
     {
-        let descriptor = DriverInfo { len: len, digest: digest, sig: sig };
+        descriptor = DriverInfo { len: len, digest: digest, sig: sig };
         let bincoded = Bincoded::new(&descriptor)
             .chain_err(|| "driver metadata encoding issue")?;
 
@@ -201,11 +202,11 @@ pub fn sign(driver_path: &Path, keys: &InsecureKeys, out_dir: &Path) -> Result<(
 
     println!("Wrote signature.");
 
-    Ok(())
+    Ok(descriptor)
 }
 
 /// Verifies the output of `sign`.
-pub fn verify(pk: &sign::PublicKey, dir: &Path) -> Result<()> {
+pub fn verify(pk: &sign::PublicKey, dir: &Path) -> Result<DriverInfo> {
     assert!(sodiumoxide::init());
 
     let ref bin_path = dir.join("latest.bin");
@@ -228,7 +229,7 @@ pub fn verify(pk: &sign::PublicKey, dir: &Path) -> Result<()> {
     let verified = sign::verify_detached(&sig, &info.digest.0, pk);
     ensure!(verified, "invalid driver signature");
 
-    Ok(())
+    Ok(info)
 }
 
 fn digest_from_bytes(bytes: &[u8]) -> Digest {

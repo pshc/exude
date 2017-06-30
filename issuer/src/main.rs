@@ -68,7 +68,7 @@ fn sign() -> Result<()> {
 
     let keys = issuer::load_keys()?;
 
-    issuer::sign(&driver_path, &keys, &root_path)
+    issuer::sign(&driver_path, &keys, &root_path).map(|_info| ())
 }
 
 fn usage() -> ! {

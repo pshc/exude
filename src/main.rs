@@ -63,10 +63,10 @@ fn run() -> Result<()> {
     while input != "" && input != "q\n" {
 
         match build(&config, &keys) {
-            Ok(()) => (),
+            Ok(_info) => (),
             Err(Error(ErrorKind::BuildError, _)) |
             Err(Error(ErrorKind::Cancelled, _)) => (),
-            e => return e
+            Err(e) => return Err(e)
         }
 
         print!("> ");
@@ -96,7 +96,7 @@ impl Config {
 }
 
 
-fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
+fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<issuer::DriverInfo> {
     // G
     {
         let manifest = config.vendor_manifest();
@@ -140,16 +140,17 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
     };
 
     // Driver
+    let descriptor;
     {
         let stream = cargo::Command::new()
             .manifest_path(&config.driver_manifest())
             .spawn("build")?;
         let artifact = process_build(stream, "driver", false, None)?;
         if artifact.fresh {
-            issuer::verify(&keys.0, &config.root)?;
+            descriptor = issuer::verify(&keys.0, &config.root)?;
             println!("       Fresh driver");
         } else {
-            issuer::sign(&artifact.path, keys, &config.root)?;
+            descriptor = issuer::sign(&artifact.path, keys, &config.root)?;
             println!("  Signed new driver");
         }
     }
@@ -157,7 +158,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<()> {
     client_thread.join().expect("client thread")?;
     drop(client_switch);
 
-    Ok(())
+    Ok(descriptor)
 }
 
 #[derive(Debug)]
