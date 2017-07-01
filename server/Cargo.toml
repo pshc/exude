@@ -5,6 +5,7 @@ publish = false
 version = "0.1.0"
 
 [dependencies]
+bytes = "0.4.4"
 error-chain = "0.10.0"
 futures = "0.1"
 tokio-core = "0.1"

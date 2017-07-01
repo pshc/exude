@@ -6,7 +6,7 @@ use super::Digest;
 pub static INLINE_MAX: usize = 100_000_000;
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DriverInfo {
     pub len: usize,
     pub digest: super::Digest,

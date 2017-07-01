@@ -11,11 +11,14 @@ pub mod cargo;
 
 use std::fs;
 use std::io::{self, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+
+use issuer::{Bincoded, DriverInfo};
 
 use cargo::Output;
 use errors::*;
@@ -61,9 +64,21 @@ fn run() -> Result<()> {
 
     let mut input = format!("\n");
     while input != "" && input != "q\n" {
+        if input == "?\n" {
+            help();
+            continue
+        }
 
         match build(&config, &keys) {
-            Ok(_info) => (),
+            Ok((info, novelty)) => {
+                if input == "f\n" || !novelty.is_still_fresh() {
+                    let hex = info.digest.short_hex();
+                    match announce_build(info) {
+                        Ok(()) => println!("   Announced driver {}", hex),
+                        Err(e) => writeln!(io::stderr(), "announce: {}", e).expect("stderr"),
+                    }
+                }
+            }
             Err(Error(ErrorKind::BuildError, _)) |
             Err(Error(ErrorKind::Cancelled, _)) => (),
             Err(e) => return Err(e)
@@ -73,6 +88,15 @@ fn run() -> Result<()> {
         io::stdout().flush().expect("flush");
         input.clear();
         io::stdin().read_line(&mut input).chain_err(|| "stdin")?;
+    }
+
+    fn help() {
+        println!("
+? - help
+f - rebuild and force re-announce
+q - quit
+anything else: rebuild and announce if changed
+");
     }
 
     Ok(())
@@ -96,7 +120,7 @@ impl Config {
 }
 
 
-fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<issuer::DriverInfo> {
+fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<(DriverInfo, Novelty)> {
     // G
     {
         let manifest = config.vendor_manifest();
@@ -163,7 +187,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<issuer::DriverI
     client_thread.join().expect("client thread")?;
     drop(client_switch);
 
-    Ok(descriptor)
+    Ok((descriptor, novelty))
 }
 
 #[derive(Debug)]
@@ -273,6 +297,25 @@ fn process_build(
     } else {
         Ok(output.unwrap_or_else(|| panic!("target {} not seen in build output", name)))
     }
+}
+
+fn announce_build(info: DriverInfo) -> Result<()> {
+    let addr: SocketAddr = ([127, 0, 0, 1], 2002).into();
+    let mut sock = TcpStream::connect(addr).chain_err(|| "couldn't connect to server")?;
+    let buf = Bincoded::new(&info).chain_err(|| "couldn't serialize driver descriptor")?;
+    write_with_length_sync(&mut sock, buf.as_ref())
+        .chain_err(|| "couldn't write driver descriptor")
+}
+
+fn write_with_length_sync<W: Write>(writer: &mut W, bytes: &[u8]) -> io::Result<()> {
+    let len = bytes.len();
+    if len > 0xffff {
+        let msg = format!("written message too long: {}", len);
+        return Err(io::Error::new(io::ErrorKind::Other, msg));
+    }
+    let len_buf = [(len >> 8) as u8, len as u8];
+    writer.write_all(&len_buf)?;
+    writer.write_all(bytes)
 }
 
 /// Bumps an existing file's mtime.

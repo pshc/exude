@@ -181,7 +181,10 @@ impl<P: Pipe> RenderImpl<Res, P> {
                         self.broken_comms = true;
                         break;
                     }
-                    Err(e) => panic!(e),
+                    Err(e) => {
+                        use error_chain::ChainedError;
+                        panic!("{}", e.display());
+                    }
                 }
             }
         }

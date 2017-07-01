@@ -1,6 +1,7 @@
-#![feature(box_syntax)]
+#![feature(box_patterns, box_syntax)]
 #![recursion_limit = "1024"]
 
+extern crate bytes;
 #[macro_use]
 extern crate error_chain;
 extern crate futures;
@@ -19,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::rc::Rc;
 
+use bytes::Bytes;
 use futures::future::{self, Future, IntoFuture};
 use futures::stream::{self, Stream};
 use futures::unsync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -112,13 +114,79 @@ fn serve(addr: &SocketAddr) -> Result<()> {
             }
         );
 
+    let clients = clients.clone();
+    let broadcast = move |bytes: Bytes| {
+        let mut n = 0;
+        for (id, client) in clients.borrow().iter() {
+            if let Err(_) = client.outbox_tx.send(bytes.clone()) {
+                writeln!(io::stderr(), "client #{}: outbox closed", id).expect("stderr");
+            } else {
+                n += 1;
+            }
+        }
+        n
+    };
+
+    // listen for upgrades
+    let (upgrade_tx, upgrade_rx) = unbounded();
+    serve_controller(core.handle(), upgrade_tx);
+
+    // broadcast upgrades to clients
+    core.handle().spawn(upgrade_rx.for_each(move |info| {
+        match Bincoded::new(&info) {
+            Ok(bincoded) => {
+                let vec: Vec<u8> = bincoded.into();
+                let n = broadcast(Bytes::from(vec));
+                if n > 0 {
+                    println!("Sent update to {} client(s)", n);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                writeln!(io::stderr(), "bincode driver: {}", e).expect("stderr");
+                Err(())
+            }
+        }
+    }));
+
     core.run(server).chain_err(|| "core listener failed")
+}
+
+fn serve_controller(handle: tokio_core::reactor::Handle, tx: UnboundedSender<DriverInfo>) {
+    let addr: SocketAddr = ([127, 0, 0, 1], 2002).into();
+    let listener = TcpListener::bind(&addr, &handle).expect("couldn't bind controller");
+    println!("Controller listening on: {}", addr);
+
+    fn relay_upgrade(
+        sock: TcpStream,
+        tx: UnboundedSender<DriverInfo>)
+        -> Box<Future<Item = (), Error = ()>> {
+
+        let (r, _) = sock.split();
+        box common::read_bincoded::<_, DriverInfo>(r).and_then(move |(_, info)| {
+            tx.send(info).chain_err(|| "couldn't send upgrade")
+        })
+            .map_err(|e| println!("control: {:?}", e))
+    }
+
+    let handle2 = handle.clone();
+    let controller = listener
+        .incoming()
+        .for_each(
+            move |(sock, _)| {
+                handle2.spawn(relay_upgrade(sock, tx.clone()));
+                Ok(())
+            }
+        )
+        .map_err(|e| println!("control: {:?}", e));
+
+    handle.spawn(controller);
 }
 
 /// Stored in the table of clients.
 struct ClientEntry {
     addr: SocketAddr,
-    outbox_tx: UnboundedSender<Vec<u8>>,
+    outbox_tx: UnboundedSender<Bytes>,
 }
 
 /// Passed around in the request handling code.
@@ -126,7 +194,7 @@ struct ClientIO {
     r: ReadHalf<TcpStream>,
     w: WriteHalf<TcpStream>,
     client: Rc<ClientEntry>,
-    outbox_rx: UnboundedReceiver<Vec<u8>>,
+    outbox_rx: UnboundedReceiver<Bytes>,
 }
 
 fn serve_client(io: ClientIO) -> Box<Future<Item = (), Error = ()>> {
@@ -200,6 +268,17 @@ impl ClientEntry {
         use api::UpRequest::*;
 
         match req {
+            AcceptUpgrade(box client_sent_info) => {
+                let info = try_box!(read_latest_metadata());
+                if info != client_sent_info {
+                    let msg = "client sent invalid/outdated upgrade response";
+                    return box future::failed(msg.into());
+                }
+                // just write inline for now...
+                let HashedHeapFile(buf, _) = try_box!(HashedHeapFile::from_metadata(info));
+                let bytes = Bytes::from(buf);
+                box self.outbox_tx.send(bytes).chain_err(|| "outbox_tx closed").into_future()
+            }
             Ping(n) => {
                 println!("{} pinged ({})", self.addr, n);
                 box self.send(&api::DownResponse::Pong(n)).into_future()
@@ -213,8 +292,9 @@ impl ClientEntry {
 
     fn send<T: Serialize>(&self, msg: &T) -> Result<()> {
         let coded = Bincoded::new(msg)?;
+        let vec: Vec<u8> = coded.into();
         self.outbox_tx
-            .send(coded.into())
+            .send(Bytes::from(vec))
             .chain_err(|| "outbox_tx closed")
     }
 }
