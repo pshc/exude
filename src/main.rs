@@ -105,7 +105,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<issuer::DriverI
             .features(&["gl"])
             .spawn("build")?;
         let artifact = process_build(stream, "g", false, None)?;
-        if artifact.fresh {
+        if artifact.novelty.is_still_fresh() {
             println!("       Fresh G");
         } else {
             println!("     Rebuilt G");
@@ -129,7 +129,7 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<issuer::DriverI
         thread::spawn(
             move || -> Result<()> {
                 let artifact = process_build(stream, "client", true, Some(&cancel_flag))?;
-                if artifact.fresh {
+                if artifact.novelty.is_still_fresh() {
                     println!("       Fresh client");
                 } else {
                     println!("     Rebuilt client");
@@ -141,17 +141,22 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<issuer::DriverI
 
     // Driver
     let descriptor;
+    let novelty;
     {
         let stream = cargo::Command::new()
             .manifest_path(&config.driver_manifest())
             .spawn("build")?;
         let artifact = process_build(stream, "driver", false, None)?;
-        if artifact.fresh {
-            descriptor = issuer::verify(&keys.0, &config.root)?;
-            println!("       Fresh driver");
-        } else {
-            descriptor = issuer::sign(&artifact.path, keys, &config.root)?;
-            println!("  Signed new driver");
+        novelty = artifact.novelty;
+        match novelty {
+            Novelty::StillFresh => {
+                descriptor = issuer::verify(&keys.0, &config.root)?;
+                println!("       Fresh driver");
+            }
+            Novelty::BrandNew => {
+                descriptor = issuer::sign(&artifact.path, keys, &config.root)?;
+                println!("  Signed new driver");
+            }
         }
     }
 
@@ -164,7 +169,22 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<issuer::DriverI
 #[derive(Debug)]
 struct Artifact {
     path: PathBuf,
-    fresh: bool,
+    novelty: Novelty,
+}
+
+#[derive(Debug)]
+enum Novelty {
+    BrandNew,
+    StillFresh,
+}
+
+impl Novelty {
+    fn is_still_fresh(&self) -> bool {
+        match *self {
+            Novelty::BrandNew => false,
+            Novelty::StillFresh => true,
+        }
+    }
 }
 
 fn process_build(
@@ -198,7 +218,11 @@ fn process_build(
                     output = Some(
                         Artifact {
                             path: artifact.filenames[0].to_path_buf(),
-                            fresh: artifact.fresh,
+                            novelty: if artifact.fresh {
+                                Novelty::StillFresh
+                            } else {
+                                Novelty::BrandNew
+                            },
                         }
                     );
                 }
