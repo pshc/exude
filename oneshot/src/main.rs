@@ -29,7 +29,7 @@ use client::net;
 use client::common::{self, OurFuture};
 use client::render_loop::{self, Engine};
 use driver::{DriverState, RenderImpl};
-use proto::{Bincoded, Digest, handshake};
+use proto::{Bincoded, Bytes, Digest, handshake};
 use proto::bincoded;
 use proto::serde::{Deserialize, Serialize};
 
@@ -177,18 +177,17 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
 }
 
 struct StaticComms {
-    pub rx: mpsc::Receiver<Box<[u8]>>,
-    pub tx: futures::sync::mpsc::UnboundedSender<Box<[u8]>>,
+    pub rx: mpsc::Receiver<Bytes>,
+    pub tx: futures::sync::mpsc::UnboundedSender<Bytes>,
 }
 
 impl driver::comms::Pipe for StaticComms {
     fn send<T: Serialize>(&self, msg: &T) -> driver::Result<()> {
         // so many copies... ugh!
         let bin = Bincoded::new(msg)?;
-        // todo we should go directly to Box<[u8]>
-        let vec: Vec<u8> = bin.into();
-        assert!(vec.len() <= ::std::i32::MAX as usize);
-        let res = self.tx.send(vec.into_boxed_slice());
+        let bytes: Bytes = bin.into();
+        assert!(bytes.len() <= ::std::i32::MAX as usize);
+        let res = self.tx.send(bytes);
         driver::ResultExt::chain_err(res, || format!("couldn't send message"))
     }
 

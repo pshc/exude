@@ -91,7 +91,7 @@ fn bincoded_repr() {
     use super::Bincoded;
 
     let orig = Digest::sample();
-    let coded = Bincoded::new(&orig).unwrap();
+    let coded = Bincoded::new(&orig).expect("bincode digest");
     assert_eq!(coded.as_ref().len(), LEN);
     assert_eq!(&orig.0[..], coded.as_ref());
 }

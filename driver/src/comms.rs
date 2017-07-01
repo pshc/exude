@@ -4,7 +4,7 @@ use std::ptr;
 
 use errors::*;
 use driver_abi::DriverCallbacks;
-use proto::bincoded::{self, Bincoded};
+use proto::bincoded;
 use proto::serde::{Deserialize, Serialize};
 
 pub trait Pipe {
@@ -33,13 +33,21 @@ impl Pipe for Wrapper {
     fn send<T: Serialize>(&self, msg: &T) -> Result<()> {
         let cbs = unsafe { &*self.0 };
 
-        // so many copies... ugh!
-        let bin = Bincoded::new(msg)?;
-        let vec: Vec<u8> = bin.into();
-        assert!(vec.len() <= ::std::i32::MAX as usize);
-        let code = (cbs.send_fn)(cbs.ctx, vec.as_ptr(), vec.len() as i32);
-        ensure!(code >= 0, ErrorKind::BrokenComms);
-        Ok(())
+        let len = bincoded::serialized_size(msg)? as i32;
+        let packet = (cbs.alloc_fn)(cbs.ctx, len);
+        assert!(!packet.is_null());
+        let mut packet_ref = unsafe { ::std::slice::from_raw_parts_mut(packet, len as usize) };
+        match bincoded::bincode::serialize_into(&mut packet_ref, msg, bincoded::bincode::Infinite) {
+            Ok(()) => {
+                let code = (cbs.send_fn)(cbs.ctx, packet, len);
+                ensure!(code >= 0, ErrorKind::BrokenComms);
+                Ok(())
+            }
+            Err(e) => {
+                (cbs.free_fn)(cbs.ctx, packet, len);
+                Err(e.into())
+            }
+        }
     }
 
     fn try_recv<T>(&self) -> Result<Option<T>>
@@ -47,12 +55,12 @@ impl Pipe for Wrapper {
         for<'de> T: Deserialize<'de>,
     {
         let cbs = unsafe { &*self.0 };
-        let mut buf_ptr = ptr::null_mut();
-        let len = (cbs.try_recv_fn)(cbs.ctx, &mut buf_ptr);
+        let mut packet = ptr::null_mut();
+        let len = (cbs.try_recv_fn)(cbs.ctx, &mut packet);
         if len > 0 {
-            let slice = unsafe { ::std::slice::from_raw_parts(buf_ptr, len as usize) };
+            let slice = unsafe { ::std::slice::from_raw_parts(packet, len as usize) };
             let result = bincoded::deserialize_exact(slice).chain_err(|| "couldn't decode message");
-            unsafe { drop(Box::from_raw(buf_ptr)) }
+            (cbs.free_fn)(cbs.ctx, packet, len);
             result.map(Some)
         } else if len == 0 {
             Ok(None)

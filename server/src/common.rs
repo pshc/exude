@@ -4,7 +4,7 @@ use futures::future::{self, Future};
 use tokio_io::{self, AsyncRead, AsyncWrite};
 
 use errors::*;
-use proto::Bincoded;
+use proto::{Bincoded, BytesMut};
 use proto::serde::{Deserialize, Serialize};
 
 
@@ -12,20 +12,33 @@ use proto::serde::{Deserialize, Serialize};
 pub type OurFuture<T> = Box<Future<Item = T, Error = Error>>;
 
 /// Reads a 16-bit length header and then bytes asynchronously.
-pub fn read_with_length<R: AsyncRead + 'static>(reader: R) -> OurFuture<(R, Vec<u8>)> {
+pub fn read_with_length<R: AsyncRead + 'static>(reader: R) -> OurFuture<(R, BytesMut)> {
     let buf = [0u8, 0];
     box tokio_io::io::read_exact(reader, buf)
             .and_then(
         |(reader, len_buf)| {
             let len = ((len_buf[0] as usize) << 8) | len_buf[1] as usize;
-            let mut buf = Vec::with_capacity(len);
+            let mut bytes = BytesMut::with_capacity(len);
             unsafe {
-                buf.set_len(len);
+                bytes.set_len(len);
             }
-            tokio_io::io::read_exact(reader, buf)
+            tokio_io::io::read_exact(reader, BytesMutAsMut(bytes))
         }
     )
-            .then(|res| res.chain_err(|| "couldn't read length-delimited packet"))
+            .then(|res| {
+                res
+                    .map(|(r, bmam)| (r, bmam.0))
+                    .chain_err(|| "couldn't read length-delimited packet")
+            })
+}
+
+// BytesMut does not impl AsMut<[u8]>; workaround
+struct BytesMutAsMut(BytesMut);
+
+impl AsMut<[u8]> for BytesMutAsMut {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
 }
 
 /// Reads a 16-bit length header and then buffers and deserializes bytes.
@@ -35,8 +48,8 @@ where
     for<'de> T: Deserialize<'de> + 'static,
 {
     box read_with_length(reader).and_then(
-        |(reader, vec)| {
-            let bincoded = unsafe { Bincoded::<T>::from_vec(vec) };
+        |(reader, bytes)| {
+            let bincoded = unsafe { Bincoded::<T>::from_bytes(bytes.freeze()) };
             bincoded
                 .deserialize()
                 .map(|val| (reader, val))
@@ -45,21 +58,21 @@ where
     )
 }
 
-/// Write a 16-bit length header, and then the bytes asynchronously.
+/// Write a 16-bit length header, and then `buf` asynchronously.
 ///
-/// The future returns `(write_half, vec)`.
-pub fn write_with_length<W, V>(writer: W, vec: V) -> OurFuture<(W, V)>
+/// The future returns `(write_half, buf)`.
+pub fn write_with_length<W, B>(writer: W, buf: B) -> OurFuture<(W, B)>
 where
     W: AsyncWrite + 'static,
-    V: AsRef<[u8]> + 'static,
+    B: AsRef<[u8]> + 'static,
 {
-    let len = vec.as_ref().len();
+    let len = buf.as_ref().len();
     if len > 0xffff {
         return box future::err(format!("written message too long: {}", len).into());
     }
     let len_buf = [(len >> 8) as u8, len as u8];
     box tokio_io::io::write_all(writer, len_buf)
-            .and_then(move |(writer, _)| tokio_io::io::write_all(writer, vec))
+            .and_then(move |(writer, _)| tokio_io::io::write_all(writer, buf))
             .then(|res| res.chain_err(|| "couldn't write length-delimited packet"))
 }
 

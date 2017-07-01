@@ -103,7 +103,7 @@ fn client(server_addr: SocketAddr) -> Result<()> {
 
                                     let (driver_tx, driver_rx) = mpsc::channel();
                                     let (tx, rx) = futures::sync::mpsc::unbounded();
-                                    let comms = connector::DriverComms { rx: driver_rx, tx: tx };
+                                    let comms = connector::DriverComms::new(driver_rx, tx);
                                     let net_comms = net::Comms { tx: driver_tx, rx: rx };
 
                                     // inform the draw thread about our new driver

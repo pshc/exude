@@ -7,9 +7,11 @@ use futures::stream::{self, Stream};
 use futures::sync::mpsc::UnboundedReceiver;
 use tokio_io::{AsyncRead, AsyncWrite};
 
+use proto::Bytes;
+
 pub struct Comms {
-    pub tx: mpsc::Sender<Box<[u8]>>,
-    pub rx: UnboundedReceiver<Box<[u8]>>,
+    pub tx: mpsc::Sender<Bytes>,
+    pub rx: UnboundedReceiver<Bytes>,
 }
 
 impl Comms {
@@ -26,8 +28,8 @@ impl Comms {
 
         let read = stream::unfold(r, |r| Some(common::read_with_length(r).map(swap)))
             .for_each(
-                move |vec| {
-                    tx.send(vec.into_boxed_slice())
+                move |bytes| {
+                    tx.send(bytes.freeze())
                         .chain_err(|| ErrorKind::BrokenComms)
                 }
             );

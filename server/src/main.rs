@@ -1,7 +1,6 @@
 #![feature(box_patterns, box_syntax)]
 #![recursion_limit = "1024"]
 
-extern crate bytes;
 #[macro_use]
 extern crate error_chain;
 extern crate futures;
@@ -13,14 +12,13 @@ mod common;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::rc::Rc;
 
-use bytes::Bytes;
 use futures::future::{self, Future, IntoFuture};
 use futures::stream::{self, Stream};
 use futures::unsync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -30,7 +28,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::io::{ReadHalf, WriteHalf};
 
 use common::OurFuture;
-use proto::{Bincoded, DriverInfo, api, handshake};
+use proto::{Bincoded, Bytes, BytesMut, DriverInfo, api, handshake};
 use proto::serde::Serialize;
 
 mod errors {
@@ -143,8 +141,8 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     core.handle().spawn(upgrade_rx.for_each(move |info| {
         match Bincoded::new(&info) {
             Ok(bincoded) => {
-                let vec: Vec<u8> = bincoded.into();
-                let n = broadcast(Bytes::from(vec));
+                let bytes = bincoded.into();
+                let n = broadcast(bytes);
                 if n > 0 {
                     println!("Sent update to {} client(s)", n);
                 }
@@ -310,9 +308,9 @@ impl ClientEntry {
 
     fn send<T: Serialize>(&self, msg: &T) -> Result<()> {
         let coded = Bincoded::new(msg)?;
-        let vec: Vec<u8> = coded.into();
+        let bytes = coded.into();
         self.outbox_tx
-            .send(Bytes::from(vec))
+            .send(bytes)
             .chain_err(|| "outbox_tx closed")
     }
 }
@@ -325,15 +323,22 @@ fn read_latest_metadata() -> Result<DriverInfo> {
 }
 
 fn read_metadata(path: &Path) -> Result<DriverInfo> {
-    let mut vec = Vec::new();
-    let n = File::open(path)
-        .and_then(|mut f| f.read_to_end(&mut vec))
-        .chain_err(|| format!("couldn't open metadata ({})", path.display()))?;
-    if n == 0 {
-        bail!("metadata was empty");
+    let len = fs::metadata(path)
+        .chain_err(|| format!("couldn't stat metadata ({})", path.display()))?
+        .len() as usize; // unchecked cast
+    if len == 0 {
+        bail!("metadata ({}) is empty", path.display());
     }
+    let mut bytes = BytesMut::with_capacity(len);
+    unsafe {
+        bytes.set_len(len);
+    }
+    File::open(path)
+        .and_then(|mut f| f.read_exact(&mut bytes))
+        .chain_err(|| format!("couldn't open metadata ({})", path.display()))?;
+    // omitted: eof check
     let info: DriverInfo =
-        unsafe { Bincoded::from_vec(vec) }
+        unsafe { Bincoded::from_bytes(bytes.freeze()) }
             .deserialize()
             .chain_err(|| format!("couldn't decode metadata ({})", path.display()))?;
     Ok(info)

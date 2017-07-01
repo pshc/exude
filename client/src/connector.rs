@@ -1,15 +1,17 @@
 use std;
+use std::collections::HashMap;
 use std::io::{self, ErrorKind, Write};
 use std::mem;
 use std::path::Path;
 use std::ptr;
 use std::sync::mpsc;
 
-use futures;
+use futures::sync::mpsc::UnboundedSender;
 use libloading::{Library, Symbol};
 
 use driver_abi::{self, CallbackCtx, DriverCallbacks};
 use g;
+use proto::Bytes;
 
 rental! {
     mod rent_libloading {
@@ -117,16 +119,26 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
 
 /// Generates function pointers and context for DriverCallbacks.
 pub struct DriverComms {
-    pub rx: mpsc::Receiver<Box<[u8]>>,
-    pub tx: futures::sync::mpsc::UnboundedSender<Box<[u8]>>,
+    pub rx: mpsc::Receiver<Bytes>,
+    pub tx: UnboundedSender<Bytes>,
+    packets: HashMap<usize, (usize, usize)>,
 }
 
+/// If there are more packets than this at once, we are likely leaking (or backed up...?)
+const MAX_PACKETS: usize = 32;
+
 impl DriverComms {
+    pub fn new(rx: mpsc::Receiver<Bytes>, tx: UnboundedSender<Bytes>) -> Self {
+        DriverComms { rx, tx, packets: HashMap::with_capacity(MAX_PACKETS) }
+    }
+
     pub fn into_callbacks(comms: Box<DriverComms>) -> DriverCallbacks {
         DriverCallbacks {
             ctx: CallbackCtx(Box::into_raw(comms) as *mut ()),
             send_fn: driver_send,
             try_recv_fn: driver_try_recv,
+            alloc_fn: driver_alloc,
+            free_fn: driver_free,
         }
     }
 
@@ -136,43 +148,99 @@ impl DriverComms {
         cbs.ctx.0 = ptr::null_mut();
         unsafe { Box::from_raw(ptr) }
     }
-}
 
-extern "C" fn driver_send(ctx: CallbackCtx, buf: *const u8, len: i32) -> i32 {
-    let comms = unsafe {
-        (ctx.0 as *mut DriverComms)
-            .as_mut()
-            .expect("driver_send: null")
-    };
-    assert!(len > 0);
-    assert!(!buf.is_null());
-
-    let slice = unsafe { std::slice::from_raw_parts(buf, len as usize) };
-    match comms.tx.send(slice.into()) {
-        Ok(()) => 0,
-        Err(_) => -1,
+    fn with_ctx<T, F: FnOnce(&mut Self) -> T>(ctx: CallbackCtx, f: F) -> T {
+        let comms = unsafe { (ctx.0 as *mut DriverComms).as_mut() }.expect("null ctx");
+        f(comms)
     }
-}
 
-extern "C" fn driver_try_recv(ctx: CallbackCtx, buf_out: *mut *mut u8) -> i32 {
-    let comms = unsafe {
-        (ctx.0 as *mut DriverComms)
-            .as_mut()
-            .expect("driver_try_recv: null")
-    };
-    assert!(!buf_out.is_null());
-
-    match comms.rx.try_recv() {
-        Ok(slice) => {
-            let len = slice.len();
-            assert!(len != 0);
-            assert!(len <= std::i32::MAX as usize);
-            unsafe {
-                *buf_out = Box::into_raw(slice) as *mut u8;
-            }
-            len as i32
+    /// Must call `vec_from_packet` with the result, or memory will leak.
+    fn packet_from_vec(&mut self, mut vec: Vec<u8>) -> *mut u8 {
+        if self.packets.len() == MAX_PACKETS {
+            println!("warning: too many packets concurrently allocated; possible memory leak");
         }
-        Err(mpsc::TryRecvError::Empty) => 0,
-        Err(mpsc::TryRecvError::Disconnected) => -1,
+        let len = vec.len();
+        let cap = vec.capacity();
+        let ptr = vec.as_mut_ptr();
+        assert!(!ptr.is_null());
+        // remember this packet's details
+        self.packets.insert(ptr as usize, (len, cap));
+        // and return it as a pointer
+        mem::forget(vec);
+        ptr
     }
+
+    unsafe fn vec_from_packet(&mut self, packet: *mut u8, len: usize) {
+        let (stored_len, cap) = self.packets.remove(&(packet as usize)).expect("free invalid");
+        assert_eq!(len, stored_len);
+        assert!(cap >= len);
+        let vec = Vec::from_raw_parts(packet, len, cap);
+        drop(vec);
+    }
+}
+
+impl Drop for DriverComms {
+    fn drop(&mut self) {
+        if !self.packets.is_empty() {
+            println!("comms: leaked {} packet(s)", self.packets.len());
+        }
+    }
+}
+
+/// Called from the driver to allocate a packet for sending.
+extern "C" fn driver_alloc(ctx: CallbackCtx, len: i32) -> *mut u8 {
+    assert!(len > 0);
+    DriverComms::with_ctx(ctx, |comms| {
+        comms.packet_from_vec(vec![0u8; len as usize])
+    })
+}
+
+/// Called from the driver to free a packet it received.
+extern "C" fn driver_free(ctx: CallbackCtx, ptr: *mut u8, len: i32) {
+    assert!(!ptr.is_null());
+    assert!(len > 0);
+    DriverComms::with_ctx(ctx, |comms| {
+        let vec = unsafe { comms.vec_from_packet(ptr, len as usize) };
+        drop(vec);
+    })
+}
+
+/// Called from driver to send messages to the server, c/o us (the client).
+extern "C" fn driver_send(ctx: CallbackCtx, packet: *mut u8, len: i32) -> i32 {
+    assert!(len > 0);
+    assert!(!packet.is_null());
+
+    DriverComms::with_ctx(ctx, |comms| {
+        let slice = unsafe { std::slice::from_raw_parts(packet, len as usize) };
+        match comms.tx.send(slice.into()) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
+}
+
+/// Called from driver to check for messages inbound from the server, c/o us.
+extern "C" fn driver_try_recv(ctx: CallbackCtx, packet_out: *mut *mut u8) -> i32 {
+    assert!(!packet_out.is_null());
+
+    DriverComms::with_ctx(ctx, |comms| {
+        match comms.rx.try_recv() {
+            Ok(bytes) => {
+                // ideally we would transform `bytes` into a `vec` here, rather than copy:
+                // https://github.com/carllerche/bytes/issues/86
+                let vec = bytes.to_vec();
+
+                let len = vec.len();
+                assert!(len != 0);
+                assert!(len <= std::i32::MAX as usize);
+
+                unsafe {
+                    *packet_out = comms.packet_from_vec(vec);
+                }
+                len as i32
+            }
+            Err(mpsc::TryRecvError::Empty) => 0,
+            Err(mpsc::TryRecvError::Disconnected) => -1,
+        }
+    })
 }

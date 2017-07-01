@@ -24,13 +24,19 @@ pub struct DriverCallbacks {
     /// Must be passed into all below functions.
     pub ctx: CallbackCtx,
 
-    /// Passed bytes will be copied to an internal buffer.
+    /// Allocates a packet for use by `send_fn`.
+    pub alloc_fn: extern "C" fn(CallbackCtx, len: i32) -> *mut u8,
+
+    /// Takes ownership of the passed packet.
     /// On error, returns a negative value.
-    pub send_fn: extern "C" fn(CallbackCtx, buf: *const u8, len: i32) -> i32,
+    pub send_fn: extern "C" fn(CallbackCtx, packet: *mut u8, len: i32) -> i32,
 
     /// Attempt to receive a message, non-blocking.
-    /// On message, writes the pointer to a new allocated buffer, and returns its length.
+    /// On message, writes the pointer to a new allocated packet, and returns its length.
     /// If no messages are pending, returns zero.
     /// On error, returns a negative value.
-    pub try_recv_fn: extern "C" fn(CallbackCtx, buf_out: *mut *mut u8) -> i32,
+    pub try_recv_fn: extern "C" fn(CallbackCtx, packet_out: *mut *mut u8) -> i32,
+
+    /// Frees packets obtained from `try_recv_fn` or `alloc_fn`.
+    pub free_fn: extern "C" fn(CallbackCtx, packet: *mut u8, len: i32),
 }
