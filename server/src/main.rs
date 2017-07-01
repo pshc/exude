@@ -92,7 +92,7 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     };
     println!("Listening on: {}", addr);
 
-    let clients: Rc<RefCell<BTreeMap<u32, Rc<ClientEntry>>>> = Default::default();
+    let clients = ClientMap::default();
     let mut client_ctr = 0u32;
 
     let server = listener
@@ -109,7 +109,7 @@ fn serve(addr: &SocketAddr) -> Result<()> {
 
                 let (r, w) = sock.split();
                 let io = ClientIO { r, w, client: entry, outbox_rx };
-                handle.spawn(serve_client(io));
+                handle.spawn(serve_client(id, io, clients.clone()));
                 Ok(())
             }
         );
@@ -117,11 +117,19 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     let clients = clients.clone();
     let broadcast = move |bytes: Bytes| {
         let mut n = 0;
+        let mut dead_clients = vec![];
         for (id, client) in clients.borrow().iter() {
             if let Err(_) = client.outbox_tx.send(bytes.clone()) {
-                writeln!(io::stderr(), "client #{}: outbox closed", id).expect("stderr");
+                dead_clients.push(*id);
             } else {
                 n += 1;
+            }
+        }
+        if !dead_clients.is_empty() {
+            writeln!(io::stderr(), "clients already gone: {:?}", dead_clients).expect("stderr");
+            let mut clients = clients.borrow_mut();
+            for id in dead_clients {
+                clients.remove(&id);
             }
         }
         n
@@ -183,6 +191,8 @@ fn serve_controller(handle: tokio_core::reactor::Handle, tx: UnboundedSender<Dri
     handle.spawn(controller);
 }
 
+type ClientMap = Rc<RefCell<BTreeMap<u32, Rc<ClientEntry>>>>;
+
 /// Stored in the table of clients.
 struct ClientEntry {
     addr: SocketAddr,
@@ -197,20 +207,24 @@ struct ClientIO {
     outbox_rx: UnboundedReceiver<Bytes>,
 }
 
-fn serve_client(io: ClientIO) -> Box<Future<Item = (), Error = ()>> {
+fn serve_client(
+    id: u32,
+    io: ClientIO,
+    client_map: ClientMap,
+    ) -> Box<Future<Item = (), Error = ()>> {
+
     let ClientIO { r, w, client, outbox_rx } = io;
     let addr = client.addr;
-    println!("new client from {}", addr);
+    println!("new client #{} from {}", id, addr);
 
     let hello = common::read_bincoded(r);
-    let client_rc2 = client.clone();
 
     box hello
             .and_then(
         move |(r, hello)| -> OurFuture<_> {
             use handshake::Hello::*;
             use handshake::Welcome::{Current, Obsolete};
-            println!("{} is here: {:?}", addr, hello);
+            println!("client #{} is {:?}", id, hello);
             let info = try_box!(read_latest_metadata());
 
             let write: OurFuture<_> = match hello {
@@ -251,14 +265,18 @@ fn serve_client(io: ClientIO) -> Box<Future<Item = (), Error = ()>> {
             requests.join(writes).map(|_| ())
         }
     )
-            .map(|_r| ())
-            .map_err(
-        move |err| {
-            let client = client_rc2;
-            println!("{} error: {}", client.addr, err);
-            for e in err.iter().skip(1) {
-                println!("  caused by: {}", e);
+            .then(
+        move |result| {
+            client_map.borrow_mut().remove(&id);
+            if let Err(err) = result {
+                println!("client #{} error: {}", id, err);
+                for e in err.iter().skip(1) {
+                    println!("  caused by: {}", e);
+                }
+            } else {
+                println!("client #{} left", id);
             }
+            Ok(())
         }
     )
 }
