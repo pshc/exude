@@ -79,6 +79,9 @@ macro_rules! try_box {
 }
 
 fn serve(addr: &SocketAddr) -> Result<()> {
+    // preload the latest driver (if any)
+    let current_driver = HashedHeapFile::latest();
+
     let mut core = Core::new().chain_err(|| "tokio/mio pls")?;
     let handle = core.handle();
 
@@ -90,7 +93,7 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     };
     println!("Listening on: {}", addr);
 
-    let god = Rc::new(RefCell::new(God::new()));
+    let god = Rc::new(RefCell::new(God::new(current_driver.clone())));
 
     let server = listener
         .incoming()
@@ -122,6 +125,12 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     core.handle().spawn(upgrade_rx.for_each(move |info| {
         match Bincoded::new(&info) {
             Ok(bincoded) => {
+                let driver = HashedHeapFile::from_metadata(info)
+                    .map_err(|e| writeln!(io::stderr(), "load driver: {}", e).expect("stderr"))?;
+
+                // the update seems OK, so save it for future clients
+                *current_driver.borrow_mut() = Some(Rc::new(driver));
+
                 let bytes = bincoded.into();
                 let n = god.borrow_mut().broadcast(bytes);
                 if n > 0 {
@@ -171,19 +180,23 @@ fn serve_controller(handle: tokio_core::reactor::Handle, tx: UnboundedSender<Dri
 }
 
 type ClientId = u32;
+type CurrentDriver = Rc<RefCell<Option<Rc<HashedHeapFile>>>>;
 
 /// Overall server state.
 /// Try to not let this become a bottleneck.
 struct God {
     ctr: ClientId,
     clients: BTreeMap<ClientId, Rc<ClientEntry>>,
+
+    current: CurrentDriver,
 }
 
 impl God {
-    fn new() -> Self {
+    fn new(current: CurrentDriver) -> Self {
         God {
             ctr: 0,
             clients: BTreeMap::new(),
+            current,
         }
     }
 }
@@ -193,6 +206,8 @@ trait Upstream {
     fn remove_client(&mut self, id: ClientId);
     /// Returns the number of clients written to.
     fn broadcast(&mut self, bytes: Bytes) -> usize;
+
+    fn current_driver(&self) -> Option<Rc<HashedHeapFile>>;
 }
 
 impl Upstream for God {
@@ -228,6 +243,10 @@ impl Upstream for God {
             }
         }
         n
+    }
+
+    fn current_driver(&self) -> Option<Rc<HashedHeapFile>> {
+        self.current.borrow().clone()
     }
 }
 
@@ -297,7 +316,7 @@ fn serve_client<U: Upstream + 'static>(io: ClientIO<U>) -> Box<Future<Item = (),
             }
 
             let requests = stream::unfold(r, |r| Some(common::read_bincoded(r).map(swap)))
-                .for_each(move |req| client.handle_request(req));
+                .for_each(move |req| client.handle_request(req, upstream.clone()));
 
             let writes = outbox_rx
                 .map_err(|()| "UnboundedReceiver error".into())
@@ -323,19 +342,29 @@ fn serve_client<U: Upstream + 'static>(io: ClientIO<U>) -> Box<Future<Item = (),
 }
 
 impl ClientEntry {
-    fn handle_request(&self, req: api::UpRequest) -> OurFuture<()> {
+    fn handle_request<U: Upstream>(
+        &self,
+        req: api::UpRequest,
+        upstream: Rc<RefCell<U>>,
+        ) -> OurFuture<()> {
+
         use api::UpRequest::*;
 
         match req {
             AcceptUpgrade(box client_sent_info) => {
-                let info = try_box!(read_latest_metadata());
-                if info != client_sent_info {
+                let current = match upstream.borrow().current_driver() {
+                    Some(current) => current,
+                    None => {
+                        let msg = "no driver currently available";
+                        return box future::failed(msg.into());
+                    }
+                };
+                if current.info != client_sent_info {
                     let msg = "client sent invalid/outdated upgrade response";
                     return box future::failed(msg.into());
                 }
                 // just write inline for now...
-                let HashedHeapFile(buf, _) = try_box!(HashedHeapFile::from_metadata(info));
-                let bytes = Bytes::from(buf);
+                let bytes = current.bytes.clone();
                 box self.outbox_tx.send(bytes).chain_err(|| "outbox_tx closed").into_future()
             }
             Ping(n) => {
@@ -389,7 +418,7 @@ fn read_metadata(path: &Path) -> Result<DriverInfo> {
 
 /// The bytes and hash digest of a file stored on the heap.
 #[derive(Debug)]
-struct HashedHeapFile(Vec<u8>, DriverInfo);
+struct HashedHeapFile { bytes: Bytes, info: DriverInfo }
 
 impl HashedHeapFile {
     /// Read the signed driver into memory.
@@ -401,14 +430,14 @@ impl HashedHeapFile {
 
         let len = info.len;
         assert!(len <= handshake::INLINE_MAX);
-        let mut driver_buf = Vec::with_capacity(len);
+        let mut bytes = BytesMut::with_capacity(len);
         let eof = File::open(bin_path)
             .and_then(
                 |mut bin| {
                     unsafe {
-                        driver_buf.set_len(len);
+                        bytes.set_len(len);
                     }
-                    bin.read_exact(&mut driver_buf)?;
+                    bin.read_exact(&mut bytes)?;
                     Ok(bin.read(&mut [0])? == 0)
                 }
             )
@@ -417,25 +446,38 @@ impl HashedHeapFile {
             bail!("driver ({}) is wrong length", bin_path.display());
         }
 
+        let bytes = bytes.freeze();
+
         // xxx we may want to re-verify hash or sig here?
         // although the client will check them anyway
 
-        Ok(HashedHeapFile(driver_buf, info))
+        Ok(HashedHeapFile { bytes, info })
     }
 
     /// Write an InlineDriver header and then the bytes.
     fn write_to<W: AsyncWrite + 'static>(self, w: W) -> OurFuture<W> {
-        let HashedHeapFile(buf, info) = self;
-        assert!(buf.len() < handshake::INLINE_MAX);
+        let HashedHeapFile { bytes, info } = self;
+        assert!(bytes.len() < handshake::INLINE_MAX);
         let resp = handshake::Welcome::InlineDriver(info);
 
         box common::write_bincoded(w, &resp)
                 .and_then(
             move |(w, _)| {
-                tokio_io::io::write_all(w, buf)
+                tokio_io::io::write_all(w, bytes)
                     .then(|res| res.chain_err(|| "couldn't write inline driver"))
             }
         )
                 .map(|(w, _)| w)
+    }
+
+    fn latest() -> CurrentDriver {
+        let latest = match read_latest_metadata().and_then(HashedHeapFile::from_metadata) {
+            Ok(file) => Some(Rc::new(file)),
+            Err(e) => {
+                println!("preload: {}", e);
+                None
+            }
+        };
+        Rc::new(RefCell::new(latest))
     }
 }
