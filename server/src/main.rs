@@ -90,59 +90,40 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     };
     println!("Listening on: {}", addr);
 
-    let clients = ClientMap::default();
-    let mut client_ctr = 0u32;
+    let god = Rc::new(RefCell::new(God::new()));
 
     let server = listener
         .incoming()
         .for_each(
             |(sock, addr)| {
-                client_ctr += 1;
-                let id = client_ctr;
-
                 let (outbox_tx, outbox_rx) = unbounded();
 
                 let entry = Rc::new(ClientEntry { addr, outbox_tx });
-                clients.borrow_mut().insert(id, entry.clone());
+                let id = god.borrow_mut().add_client(entry.clone());
 
                 let (r, w) = sock.split();
-                let io = ClientIO { r, w, client: entry, outbox_rx };
-                handle.spawn(serve_client(id, io, clients.clone()));
+                let io = ClientIO {
+                    id, r, w,
+                    client: entry,
+                    upstream: god.clone(),
+                    outbox_rx,
+                };
+                handle.spawn(serve_client(io));
                 Ok(())
             }
         );
-
-    let clients = clients.clone();
-    let broadcast = move |bytes: Bytes| {
-        let mut n = 0;
-        let mut dead_clients = vec![];
-        for (id, client) in clients.borrow().iter() {
-            if let Err(_) = client.outbox_tx.send(bytes.clone()) {
-                dead_clients.push(*id);
-            } else {
-                n += 1;
-            }
-        }
-        if !dead_clients.is_empty() {
-            writeln!(io::stderr(), "clients already gone: {:?}", dead_clients).expect("stderr");
-            let mut clients = clients.borrow_mut();
-            for id in dead_clients {
-                clients.remove(&id);
-            }
-        }
-        n
-    };
 
     // listen for upgrades
     let (upgrade_tx, upgrade_rx) = unbounded();
     serve_controller(core.handle(), upgrade_tx);
 
     // broadcast upgrades to clients
+    let god = god.clone();
     core.handle().spawn(upgrade_rx.for_each(move |info| {
         match Bincoded::new(&info) {
             Ok(bincoded) => {
                 let bytes = bincoded.into();
-                let n = broadcast(bytes);
+                let n = god.borrow_mut().broadcast(bytes);
                 if n > 0 {
                     println!("Sent update to {} client(s)", n);
                 }
@@ -189,7 +170,66 @@ fn serve_controller(handle: tokio_core::reactor::Handle, tx: UnboundedSender<Dri
     handle.spawn(controller);
 }
 
-type ClientMap = Rc<RefCell<BTreeMap<u32, Rc<ClientEntry>>>>;
+type ClientId = u32;
+
+/// Overall server state.
+/// Try to not let this become a bottleneck.
+struct God {
+    ctr: ClientId,
+    clients: BTreeMap<ClientId, Rc<ClientEntry>>,
+}
+
+impl God {
+    fn new() -> Self {
+        God {
+            ctr: 0,
+            clients: BTreeMap::new(),
+        }
+    }
+}
+
+trait Upstream {
+    fn add_client(&mut self, client: Rc<ClientEntry>) -> ClientId;
+    fn remove_client(&mut self, id: ClientId);
+    /// Returns the number of clients written to.
+    fn broadcast(&mut self, bytes: Bytes) -> usize;
+}
+
+impl Upstream for God {
+    fn add_client(&mut self, client: Rc<ClientEntry>) -> ClientId {
+        self.ctr += 1;
+        let id = self.ctr;
+        let existing = self.clients.insert(id, client);
+        assert!(existing.is_none());
+        id
+    }
+
+    fn remove_client(&mut self, id: ClientId) {
+        if self.clients.remove(&id).is_none() {
+            writeln!(io::stderr(), "remove_client: #{} not present!", id).expect("stderr");
+            debug_assert!(false);
+        }
+    }
+
+    fn broadcast(&mut self, bytes: Bytes) -> usize {
+        let mut n = 0;
+        let mut dead_clients = vec![];
+        for (id, client) in self.clients.iter() {
+            if let Err(_) = client.outbox_tx.send(bytes.clone()) {
+                dead_clients.push(*id);
+            } else {
+                n += 1;
+            }
+        }
+        if !dead_clients.is_empty() {
+            writeln!(io::stderr(), "clients already gone: {:?}", dead_clients).expect("stderr");
+            for id in dead_clients {
+                self.remove_client(id);
+            }
+        }
+        n
+    }
+}
 
 /// Stored in the table of clients.
 struct ClientEntry {
@@ -197,21 +237,24 @@ struct ClientEntry {
     outbox_tx: UnboundedSender<Bytes>,
 }
 
-/// Passed around in the request handling code.
-struct ClientIO {
+/// Bulk parameters for `serve_client`.
+struct ClientIO<U: Upstream> {
+    id: ClientId,
     r: ReadHalf<TcpStream>,
     w: WriteHalf<TcpStream>,
     client: Rc<ClientEntry>,
+    upstream: Rc<RefCell<U>>,
     outbox_rx: UnboundedReceiver<Bytes>,
 }
 
-fn serve_client(
-    id: u32,
-    io: ClientIO,
-    client_map: ClientMap,
-    ) -> Box<Future<Item = (), Error = ()>> {
+fn serve_client<U: Upstream + 'static>(io: ClientIO<U>) -> Box<Future<Item = (), Error = ()>> {
 
-    let ClientIO { r, w, client, outbox_rx } = io;
+    let ClientIO { id, r, w, client, upstream, outbox_rx } = io;
+    let remove_myself = {
+        let up = upstream.clone();
+        move || up.borrow_mut().remove_client(id)
+    };
+
     let addr = client.addr;
     println!("new client #{} from {}", id, addr);
 
@@ -265,7 +308,7 @@ fn serve_client(
     )
             .then(
         move |result| {
-            client_map.borrow_mut().remove(&id);
+            remove_myself();
             if let Err(err) = result {
                 println!("client #{} error: {}", id, err);
                 for e in err.iter().skip(1) {
