@@ -2,7 +2,6 @@ use super::DriverInfo;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum UpRequest {
-    AcceptUpgrade(Box<DriverInfo>),
     Ping(u32),
     Bye,
 }

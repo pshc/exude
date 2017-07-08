@@ -1,24 +1,21 @@
 //! Messages sent client--server. (before driver is loaded)
 
+use std::borrow::Borrow;
+
 use super::Digest;
 
-/// Maximum byte length of an InlineDriver payload.
-pub static INLINE_MAX: usize = 100_000_000;
-
-
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DriverInfo {
     pub len: usize,
     pub digest: super::Digest,
     pub sig: super::Signature,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub enum Welcome {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum Welcome<M: Borrow<DriverInfo> = Box<DriverInfo>> {
     Current,
     Obsolete,
-    InlineDriver(DriverInfo),
-    DownloadDriver(String, DriverInfo),
+    Download(String, M),
 }
 
 #[derive(Debug, Deserialize, Serialize)]

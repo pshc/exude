@@ -7,6 +7,10 @@
 extern crate error_chain;
 extern crate futures;
 extern crate g;
+// oneshot doesn't actually need hyper, at this point
+// ... but we have to import it due to errors' Hyper case.
+// maybe we could use a cfg attr to skip this?
+extern crate hyper;
 extern crate proto;
 extern crate tokio_io;
 

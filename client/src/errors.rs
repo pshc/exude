@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use g::gfx_text;
 
 use proto;
+use hyper;
 
 error_chain! {
     errors {
@@ -12,6 +13,8 @@ error_chain! {
     }
     foreign_links {
         Bincode(proto::bincoded::Error);
+        Hyper(hyper::Error);
+        Io(io::Error);
     }
 }
 

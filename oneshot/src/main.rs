@@ -29,8 +29,9 @@ use client::net;
 use client::common::{self, OurFuture};
 use client::render_loop::{self, Engine};
 use driver::{DriverState, RenderImpl};
-use proto::{Bincoded, Bytes, Digest, handshake};
+use proto::{Bincoded, Bytes, Digest, DriverInfo};
 use proto::bincoded;
+use proto::handshake::{Hello, Welcome};
 use proto::serde::{Deserialize, Serialize};
 
 mod errors {
@@ -94,16 +95,16 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
 
                     let greeting = {
                         let cached_driver = Digest::zero(); // TEMP
-                        let hello = handshake::Hello::Oneshot(cached_driver);
+                        let hello = Hello::Oneshot(cached_driver);
                         common::write_bincoded(writer, &hello)
                             .and_then(|(w, _)| Ok(w))
                     };
 
-                    let welcome = common::read_bincoded(reader)
+                    let welcome = common::read_bincoded::<_, Welcome<Box<DriverInfo>>>(reader)
                         .and_then(
                         |(reader, welcome)| {
                             match welcome {
-                                handshake::Welcome::Current => Ok(reader),
+                                Welcome::Current => Ok(reader),
                                 _ => bail!("client too outdated for server"),
                             }
                         }

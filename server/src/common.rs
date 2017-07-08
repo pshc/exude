@@ -8,6 +8,19 @@ use proto::{Bincoded, BytesMut};
 use proto::serde::{Deserialize, Serialize};
 
 
+/// hopefully replace with `?` later
+#[macro_export]
+macro_rules! try_box {
+    ($expr:expr) => (match $expr {
+        Ok(val) => val,
+        Err(err) => {
+            let err = Err(From::from(err));
+            let future = ::futures::future::IntoFuture::into_future(err);
+            return Box::new(future);
+        }
+    })
+}
+
 /// No `Send` needed.
 pub type OurFuture<T> = Box<Future<Item = T, Error = Error>>;
 

@@ -8,6 +8,7 @@ extern crate futures;
 extern crate futures_cpupool;
 #[macro_use]
 extern crate g;
+extern crate hyper;
 extern crate libloading;
 extern crate proto;
 #[macro_use]
@@ -18,6 +19,7 @@ extern crate tokio_core;
 extern crate tokio_io;
 
 mod basic;
+#[macro_use]
 #[path="../../server/src/common.rs"]
 mod common;
 mod connector;
