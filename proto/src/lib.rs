@@ -1,21 +1,17 @@
-#![feature(core_intrinsics)]
-
-pub extern crate bincode;
 pub extern crate bytes;
+extern crate dag;
 pub extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
 pub mod api;
-pub mod bincoded;
-pub mod digest;
 pub mod handshake;
 pub mod sig;
 
-pub use self::bincoded::Bincoded;
+pub use dag::bincode;
+pub use dag::bincoded::{self, Bincoded};
 pub use bytes::{Bytes, BytesMut};
-pub use self::digest::Digest;
+pub use dag::digest::{self, Digest};
 pub use self::handshake::DriverInfo;
 pub use self::sig::Signature;
 
-static HEX_CHARS: &[u8] = b"0123456789abcdef";

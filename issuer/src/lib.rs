@@ -1,19 +1,16 @@
 #![feature(box_syntax)]
 #![recursion_limit = "1024"]
 
-extern crate digest;
 #[macro_use]
 extern crate error_chain;
 extern crate proto;
 extern crate rpassword;
-extern crate sha3;
 extern crate sodiumoxide;
 
 use std::io::{self, Read, Write};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
-use sha3::Shake128;
 use sodiumoxide::crypto::{pwhash, secretbox, sign};
 
 pub use proto::{Bincoded, Digest, DriverInfo, Signature};
@@ -168,7 +165,7 @@ pub fn sign(driver_path: &Path, keys: &InsecureKeys, out_dir: &Path) -> Result<D
     let len = driver_bytes.len();
 
     println!("Hashing driver...");
-    let digest = digest_from_bytes(&driver_bytes);
+    let digest = Digest::from_bytes(&driver_bytes);
 
     println!("Signing driver hash...");
     let sig = Signature(sign::sign_detached(&digest.0, &keys.1).0);
@@ -213,7 +210,7 @@ pub fn verify(pk: &sign::PublicKey, dir: &Path) -> Result<DriverInfo> {
     let ref meta_path = dir.join("latest.meta");
 
     let (digest, len) = File::open(bin_path)
-        .and_then(digest_from_read)
+        .and_then(Digest::from_read)
         .chain_err(|| format!("could not hash driver ({})", bin_path.display()))?;
 
     let info: DriverInfo =
@@ -230,40 +227,6 @@ pub fn verify(pk: &sign::PublicKey, dir: &Path) -> Result<DriverInfo> {
     ensure!(verified, "invalid driver signature");
 
     Ok(info)
-}
-
-fn digest_from_bytes(bytes: &[u8]) -> Digest {
-    use digest::{Input, VariableOutput};
-
-    let mut hasher = Shake128::default();
-    hasher.process(bytes);
-    let mut result = [0u8; proto::digest::LEN];
-    hasher.variable_result(&mut result).expect("hashing");
-    Digest(result)
-}
-
-fn digest_from_read<R: Read>(mut reader: R) -> io::Result<(Digest, usize)> {
-    use digest::{Input, VariableOutput};
-
-    let mut hasher = Shake128::default();
-    let mut buf = [0; 4096];
-    let mut len = 0;
-
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                len += n;
-                hasher.process(&buf[..n]);
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => (),
-            Err(e) => return Err(e),
-        }
-    }
-
-    let mut result = [0u8; proto::digest::LEN];
-    hasher.variable_result(&mut result).expect("hashing");
-    Ok((Digest(result), len))
 }
 
 pub mod secret {

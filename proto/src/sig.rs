@@ -4,7 +4,7 @@ use std::str;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de;
 
-use super::HEX_CHARS;
+use dag::digest::HEX_CHARS;
 
 pub const LEN: usize = 64;
 
