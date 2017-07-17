@@ -127,7 +127,7 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
         },
     );
 
-    let state: DriverState<StaticComms> = DriverState::new(io_comms);
+    let mut state: DriverState<StaticComms> = DriverState::new(io_comms);
 
     let mut events_loop = g::EventsLoop::new();
     let window = glutin::WindowBuilder::new()
@@ -173,7 +173,7 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
             break;
         }
 
-        engine.update(&state, &mut factory)?;
+        engine.update(&mut state, &mut factory)?;
         engine.draw(&mut encoder)?;
 
         encoder.flush(&mut device);
@@ -259,7 +259,7 @@ impl Engine<g::Res> for Oneshot {
 
     fn update(
         &mut self,
-        state: &DriverState<StaticComms>,
+        state: &mut DriverState<StaticComms>,
         factory: &mut g::Factory,
     ) -> client::Result<()> {
         self.render.update(state, factory);

@@ -42,7 +42,7 @@ macro_rules! backend_items {
         use core::nonzero::NonZero;
         use std::marker::PhantomData;
         use gfx;
-        use super::{ColorFormat, DepthFormat, DriverRef};
+        use super::{ColorFormat, DepthFormat, DriverRef, DriverRefMut};
 
         pub type Command = $backend::CommandBuffer;
         pub type Factory = $backend::Factory;
@@ -53,7 +53,7 @@ macro_rules! backend_items {
         pub type DepthStencilView = gfx::handle::DepthStencilView<Res, DepthFormat>;
 
         pub type GlDrawFn = extern "C" fn(GfxRef, &mut Encoder);
-        pub type GlUpdateFn = extern "C" fn(GfxRefMut, DriverRef, &mut Factory);
+        pub type GlUpdateFn = extern "C" fn(GfxRefMut, DriverRefMut, &mut Factory);
         pub type GlSetupFn = extern "C" fn(DriverRef, &mut Factory, RenderTargetView) -> Option<GfxBox>;
         pub type GlCleanupFn = extern "C" fn(GfxBox);
 
@@ -127,6 +127,10 @@ impl DriverBox {
         DriverRef(ptr, PhantomData)
     }
 
+    pub fn borrow_mut<'a>(&'a mut self) -> DriverRefMut<'a> {
+        DriverRefMut(self.0, PhantomData)
+    }
+
     pub fn consume(self) -> *mut () {
         self.0.get()
     }
@@ -135,6 +139,10 @@ impl DriverBox {
 /// Borrows DriverBox.
 #[derive(Clone, Copy)]
 pub struct DriverRef<'a>(pub NonZero<*const ()>, PhantomData<&'a ()>);
+
+/// Borrows DriverBox mutably.
+#[derive(Clone, Copy)]
+pub struct DriverRefMut<'a>(pub NonZero<*mut ()>, PhantomData<&'a ()>);
 
 #[cfg(test)]
 mod test {

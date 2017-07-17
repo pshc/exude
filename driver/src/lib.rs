@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use comms::{Pipe, Wrapper};
 use driver_abi::DriverCallbacks;
 pub use errors::*;
-use g::{DriverBox, DriverRef, Encoder, Res, gfx};
+use g::{DriverBox, DriverRef, DriverRefMut, Encoder, Res, gfx};
 use g::gfx::traits::FactoryExt;
 use proto::api;
 
@@ -44,12 +44,12 @@ pub extern "C" fn teardown(handle: DriverBox) -> *mut DriverCallbacks {
 /// This is what we stash inside DriverBox.
 pub struct DriverState<P> {
     pipe: P,
+    broken_comms: bool,
 }
 
 impl<P> DriverState<P> {
     pub fn new(pipe: P) -> Self {
-        let state = DriverState { pipe };
-        state
+        DriverState { pipe, broken_comms: false }
     }
 
     pub fn shutdown(self) -> P {
@@ -115,9 +115,6 @@ pub struct RenderImpl<R: gfx::Resources, P> {
     slice: gfx::Slice<R>,
     pso: gfx::PipelineState<R, pipe::Meta>,
     data: pipe::Data<R>,
-
-    // TODO move this to DriverState
-    broken_comms: bool,
     _phantom: PhantomData<P>,
 }
 
@@ -143,7 +140,6 @@ impl<P: Pipe> RenderImpl<Res, P> {
                 slice,
                 pso,
                 data,
-                broken_comms: false,
                 _phantom: PhantomData,
             }
         )
@@ -151,9 +147,9 @@ impl<P: Pipe> RenderImpl<Res, P> {
 }
 
 #[no_mangle]
-pub extern "C" fn gl_update(ctx: g::GfxRefMut, state_ref: DriverRef, factory: &mut g::Factory) {
+pub extern "C" fn gl_update(ctx: g::GfxRefMut, state_ref: DriverRefMut, factory: &mut g::Factory) {
     let render = unsafe { cast_ptr!(ctx as &mut RenderImpl<Res, Wrapper>) };
-    let state = unsafe { cast_ptr!(state_ref as &DriverState<Wrapper>) };
+    let state = unsafe { cast_ptr!(state_ref as &mut DriverState<Wrapper>) };
     render.update(state, factory);
 }
 
@@ -169,16 +165,16 @@ impl<P: Pipe> RenderImpl<Res, P> {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    pub fn update(&mut self, state: &DriverState<P>, factory: &mut g::Factory) {
+    pub fn update(&mut self, state: &mut DriverState<P>, factory: &mut g::Factory) {
 
-        if !self.broken_comms {
+        if !state.broken_comms {
             loop {
                 match state.pipe.try_recv::<api::DownResponse>() {
                     Ok(None) => break,
                     Ok(Some(msg)) => println!("=== {:?} ===", msg),
                     Err(Error(ErrorKind::BrokenComms, _)) => {
                         println!("=== COMMS BROKEN ===");
-                        self.broken_comms = true;
+                        state.broken_comms = true;
                         break;
                     }
                     Err(e) => {

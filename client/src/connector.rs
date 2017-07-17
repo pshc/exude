@@ -65,10 +65,10 @@ impl Driver {
         self.renter.rent(|syms| (syms.1)(ctx, encoder))
     }
 
-    pub fn update(&self, ctx: g::GfxRefMut, factory: &mut g::Factory) {
-        let handle = self.handle.as_ref().expect("update: null handle");
+    pub fn update(&mut self, ctx: g::GfxRefMut, factory: &mut g::Factory) {
+        let handle = self.handle.as_mut().expect("update: null handle");
         self.renter
-            .rent(|syms| (syms.2)(ctx, handle.borrow(), factory))
+            .rent(|syms| (syms.2)(ctx, handle.borrow_mut(), factory))
     }
 
     pub fn gfx_setup(&self, f: &mut g::Factory, v: g::RenderTargetView) -> Option<g::GfxBox> {

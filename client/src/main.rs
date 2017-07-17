@@ -166,7 +166,7 @@ fn client(server_addr: SocketAddr) -> Result<()> {
             break;
         }
 
-        engine.update(&(), &mut factory)?;
+        engine.update(&mut (), &mut factory)?;
         engine.draw(&mut encoder)?;
 
         encoder.flush(&mut device);
@@ -240,7 +240,7 @@ impl Engine<g::Res> for Hot {
             .map_err(|t| ErrorKind::Text(t).into())
     }
 
-    fn update(&mut self, _: &(), factory: &mut g::Factory) -> Result<()> {
+    fn update(&mut self, _: &mut (), factory: &mut g::Factory) -> Result<()> {
 
         if let Ok((path, comms)) = self.update_rx.try_recv() {
             println!("Loading driver...");
@@ -277,7 +277,7 @@ impl Engine<g::Res> for Hot {
             }
         }
 
-        if let Some((ref driver, ref mut ctx)) = self.driver {
+        if let Some((ref mut driver, ref mut ctx)) = self.driver {
             driver.update(ctx.borrow_mut(), factory);
         } else {
             self.basic_vis.update(factory, &self.main_color)?;

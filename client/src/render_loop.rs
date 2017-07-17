@@ -10,7 +10,7 @@ pub trait Engine<R: gfx::Resources> {
     type State;
 
     fn draw(&mut self, &mut gfx::Encoder<R, Self::CommandBuffer>) -> Result<()>;
-    fn update(&mut self, &Self::State, &mut Self::Factory) -> Result<()>;
+    fn update(&mut self, &mut Self::State, &mut Self::Factory) -> Result<()>;
 }
 
 pub fn should_quit(event: &WindowEvent) -> bool {
