@@ -135,3 +135,20 @@ impl DriverBox {
 /// Borrows DriverBox.
 #[derive(Clone, Copy)]
 pub struct DriverRef<'a>(pub NonZero<*const ()>, PhantomData<&'a ()>);
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use gfx::texture::AaMode;
+
+    #[cfg(all(feature = "gl", feature = "headless"))]
+    #[test]
+    fn gl_headless_text() {
+        let context = glutin::HeadlessRendererBuilder::new(1280, 720).build().unwrap();
+        let dim = (256, 256, 8, AaMode::Multi(4));
+        let (_device, factory, _color, _depth) = {
+            gfx_window_glutin::init_headless::<ColorFormat, DepthFormat>(&context, dim)
+        };
+        let _text = gfx_text::new(factory).build().unwrap();
+    }
+}

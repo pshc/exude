@@ -20,7 +20,7 @@ use futures::Future;
 use g::gfx::Device;
 use g::gfx_text;
 use g::gfx_window_glutin;
-use g::glutin;
+use g::glutin::{self, GlContext};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use tokio_io::AsyncRead;
@@ -129,13 +129,19 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
 
     let state: DriverState<StaticComms> = DriverState::new(io_comms);
 
-    let events_loop = g::EventsLoop::new();
-    let builder = glutin::WindowBuilder::new()
+    let mut events_loop = g::EventsLoop::new();
+    let window = glutin::WindowBuilder::new()
         .with_title("Standalone".to_string())
-        .with_dimensions(1024, 768)
-        .with_vsync();
-    let (window, mut device, mut factory, main_color, main_depth) =
-        gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(builder, &events_loop);
+        .with_dimensions(1024, 768);
+    let context = glutin::ContextBuilder::new()
+        .with_vsync(true);
+    let (window, mut device, mut factory, main_color, main_depth) = {
+        gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(
+            window,
+            context,
+            &events_loop,
+        )
+    };
 
     let mut engine = Oneshot::new(&state, &mut factory, main_color, main_depth)?;
 
@@ -145,12 +151,16 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
     loop {
         events_loop.poll_events(
             |event| {
-                let g::Event::WindowEvent { ref event, .. } = event;
+                let event = match event {
+                    g::Event::WindowEvent { event, .. } => event,
+                    g::Event::DeviceEvent { .. } => return,
+                    g::Event::Awakened => return,
+                };
                 if render_loop::should_quit(&event) {
                     alive = false;
                     return;
                 }
-                if let g::WindowEvent::Resized(_w, _h) = *event {
+                if let g::WindowEvent::Resized(_w, _h) = event {
                     gfx_window_glutin::update_views(
                         &window,
                         &mut engine.main_color,

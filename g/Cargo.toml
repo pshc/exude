@@ -3,21 +3,27 @@ authors = ["Paul Collier <paul@paulcollier.ca>"]
 name = "g"
 version = "0.1.0"
 
-[dependencies]
-gfx = "0.16.0"
-gfx_text = "0.17.0"
+[dependencies.gfx_text]
+git = "https://github.com/pshc/gfx_text"
+rev = "c7e369d"
+
+[dependencies.gfx]
+git = "https://github.com/gfx-rs/gfx"
+rev = "d2425de"
 
 [dependencies.gfx_device_gl]
+git = "https://github.com/gfx-rs/gfx"
 optional = true
-version = "0.14.0"
+rev = "d2425de"
 
 [dependencies.gfx_device_metal]
 optional = true
 version = "0.2.0"
 
 [dependencies.gfx_window_glutin]
+git = "https://github.com/gfx-rs/gfx"
 optional = true
-version = "0.16"
+rev = "d2425de"
 
 [dependencies.gfx_window_metal]
 optional = true
@@ -25,7 +31,7 @@ version = "0.2.0"
 
 [dependencies.glutin]
 optional = true
-version = "0.8.0"
+version = "0.9.1"
 
 [dependencies.winit]
 optional = true
@@ -33,6 +39,7 @@ version = "0.6.0"
 
 [features]
 gl = ["gfx_device_gl", "gfx_window_glutin", "glutin"]
+headless = ["gfx_window_glutin/headless"]
 metal = ["gfx_device_metal", "gfx_window_metal", "winit"]
 
 [lib]

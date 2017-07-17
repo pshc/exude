@@ -18,8 +18,12 @@ pub fn should_quit(event: &WindowEvent) -> bool {
     use g::VirtualKeyCode::{Escape, Grave};
 
     match *event {
-        WindowEvent::KeyboardInput(Pressed, _, Some(Escape), _) |
-        WindowEvent::KeyboardInput(Pressed, _, Some(Grave), _) |
+        WindowEvent::KeyboardInput { input, .. } if input.state == Pressed => {
+            match input.virtual_keycode {
+                Some(Escape) | Some(Grave) => true,
+                _ => false
+            }
+        }
         WindowEvent::Closed => true,
         _ => false,
     }
