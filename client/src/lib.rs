@@ -13,6 +13,7 @@ extern crate g;
 extern crate hyper;
 extern crate proto;
 extern crate tokio_io;
+extern crate tokio_timer;
 
 #[path="../../server/src/common.rs"]
 pub mod common;

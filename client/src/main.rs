@@ -17,6 +17,7 @@ extern crate sha3;
 extern crate sodiumoxide;
 extern crate tokio_core;
 extern crate tokio_io;
+extern crate tokio_timer;
 
 mod basic;
 #[macro_use]
@@ -36,8 +37,9 @@ use std::path::PathBuf;
 use std::process;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
-use futures::{Future, future};
+use futures::future::{self, Future, Loop};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use tokio_io::AsyncRead;
@@ -79,12 +81,28 @@ fn client(server_addr: SocketAddr) -> Result<()> {
     // for sending a new driver from net to draw thread
     let (update_tx, update_rx) = mpsc::channel::<DriverUpdate>();
 
-    let _net_thread = thread::spawn(
+    let _net_thread = thread::Builder::new().name("net".into()).spawn(
         move || {
             let mut core = Core::new().expect("net: core");
             let handle = core.handle();
 
-            let client = TcpStream::connect(&server_addr, &handle)
+            // since we're only using this for reconnects (so far...)
+            // allocate only a modest amount
+            let timer = tokio_timer::wheel()
+                .tick_duration(Duration::from_millis(500))
+                .num_slots(8) // max timeout only four seconds!
+                .initial_capacity(8)
+                .channel_capacity(8)
+                .thread_name("net timer")
+                .build();
+            let reconnect_delay = Duration::from_secs(2);
+
+            let client = future::loop_fn(0, move |attempt| {
+                let update_tx = update_tx.clone();
+                let timer = timer.clone();
+
+                println!("net: connecting...");
+                TcpStream::connect(&server_addr, &handle)
                 .then(|res| res.chain_err(|| format!("couldn't connect to server")))
                 .and_then(
                     |sock| {
@@ -116,12 +134,24 @@ fn client(server_addr: SocketAddr) -> Result<()> {
                                     net_comms.handle(r, w)
                                 }
                             )
+                            .map(Loop::Break)
                     }
-                );
+                )
+                .or_else(move |e| -> Box<Future<Item = _, Error = ()>> {
+                    errors::display_net_thread_error(e).expect("net: stderr?");
+                    if attempt < 3 {
+                        box timer.sleep(reconnect_delay)
+                            .or_else(|e| { println!("timer error: {:?}", e); Ok(()) })
+                            .map(move |()| Loop::Continue(attempt + 1))
+                    } else {
+                        box future::err(())
+                    }
+                })
+            });
 
             match core.run(client) {
                 Ok(()) => println!("net: donezo"),
-                Err(e) => errors::display_net_thread_error(e).expect("net: stderr?"),
+                Err(()) => println!("net: too many failures"),
             }
         }
     );
