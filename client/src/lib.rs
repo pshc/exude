@@ -12,6 +12,7 @@ extern crate g;
 // maybe we could use a cfg attr to skip this?
 extern crate hyper;
 extern crate proto;
+extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_timer;
 

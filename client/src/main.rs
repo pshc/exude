@@ -33,16 +33,12 @@ mod render_loop;
 
 use std::io::{self, Write};
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::process;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
 
-use futures::future::{self, Future, Loop};
-use tokio_core::net::TcpStream;
-use tokio_core::reactor::Core;
-use tokio_io::AsyncRead;
+use futures::future::Future;
+use futures::sync::mpsc::unbounded;
 
 use g::gfx::Device;
 use g::gfx_text;
@@ -51,6 +47,7 @@ use g::glutin::{self, GlContext};
 
 use common::OurFuture;
 use errors::*;
+use net::DriverUpdate;
 use proto::handshake;
 use render_loop::Engine;
 
@@ -79,80 +76,28 @@ fn main() {
 fn client(server_addr: SocketAddr) -> Result<()> {
 
     // for sending a new driver from net to draw thread
-    let (update_tx, update_rx) = mpsc::channel::<DriverUpdate>();
+    let (update_tx, update_rx) = mpsc::channel::<Update>();
 
     let _net_thread = thread::Builder::new().name("net".into()).spawn(
         move || {
-            let mut core = Core::new().expect("net: core");
-            let handle = core.handle();
-
-            // since we're only using this for reconnects (so far...)
-            // allocate only a modest amount
-            let timer = tokio_timer::wheel()
-                .tick_duration(Duration::from_millis(500))
-                .num_slots(8) // max timeout only four seconds!
-                .initial_capacity(8)
-                .channel_capacity(8)
-                .thread_name("net timer")
-                .build();
-            let reconnect_delay = Duration::from_secs(2);
-
-            let client = future::loop_fn(0, move |attempt| {
+            net::thread(server_addr, move |sock| -> OurFuture<_> {
                 let update_tx = update_tx.clone();
-                let timer = timer.clone();
+                let hello = handshake::Hello::Newbie;
+                box common::write_bincoded(sock, &hello)
+                    .and_then(|(sock, _)| receive::fetch_driver(sock))
+                    .and_then(move |(sock, info, path)| {
+                        println!("driver {}", info.digest.short_hex());
 
-                println!("net: connecting...");
-                TcpStream::connect(&server_addr, &handle)
-                .then(|res| res.chain_err(|| format!("couldn't connect to server")))
-                .and_then(
-                    |sock| {
-                        let (reader, writer) = sock.split();
+                        let (driver_tx, driver_rx) = mpsc::channel();
+                        let (tx, rx) = unbounded();
+                        let comms = connector::DriverComms::new(driver_rx, tx);
 
-                        let greeting = {
-                            let hello = handshake::Hello::Newbie;
-                            common::write_bincoded(writer, &hello).and_then(|(w, _)| Ok(w))
-                        };
-
-                        let welcome = receive::fetch_driver(reader);
-
-                        welcome
-                            .join(greeting)
-                            .and_then(
-                                move |((r, info, path), w)| -> OurFuture<_> {
-                                    println!("driver {}", info.digest.short_hex());
-
-                                    let (driver_tx, driver_rx) = mpsc::channel();
-                                    let (tx, rx) = futures::sync::mpsc::unbounded();
-                                    let comms = connector::DriverComms::new(driver_rx, tx);
-                                    let net_comms = net::Comms { tx: driver_tx, rx: rx };
-
-                                    // inform the draw thread about our new driver
-                                    if update_tx.send((path, box comms)).is_err() {
-                                        return box future::err(ErrorKind::BrokenComms.into());
-                                    }
-
-                                    net_comms.handle(r, w)
-                                }
-                            )
-                            .map(Loop::Break)
-                    }
-                )
-                .or_else(move |e| -> Box<Future<Item = _, Error = ()>> {
-                    errors::display_net_thread_error(e).expect("net: stderr?");
-                    if attempt < 3 {
-                        box timer.sleep(reconnect_delay)
-                            .or_else(|e| { println!("timer error: {:?}", e); Ok(()) })
-                            .map(move |()| Loop::Continue(attempt + 1))
-                    } else {
-                        box future::err(())
-                    }
-                })
-            });
-
-            match core.run(client) {
-                Ok(()) => println!("net: donezo"),
-                Err(()) => println!("net: too many failures"),
-            }
+                        // inform the draw thread about our new driver
+                        update_tx.send((path, box comms))
+                            .map(|()| (sock, net::ClientSide { tx: driver_tx, rx: rx }))
+                            .map_err(|_| ErrorKind::BrokenComms.into())
+                    })
+            })
         }
     );
 
@@ -215,17 +160,17 @@ struct Hot {
     main_color: g::RenderTargetView,
     main_depth: g::DepthStencilView,
     text: gfx_text::Renderer<g::Res, g::Factory>,
-    update_rx: mpsc::Receiver<DriverUpdate>,
+    update_rx: mpsc::Receiver<Update>,
 }
 
-type DriverUpdate = (PathBuf, Box<connector::DriverComms>);
+type Update = DriverUpdate<connector::DriverComms>;
 
 impl Hot {
     fn new(
         factory: &mut g::Factory,
         rtv: g::RenderTargetView,
         dsv: g::DepthStencilView,
-        update_rx: mpsc::Receiver<DriverUpdate>,
+        update_rx: mpsc::Receiver<Update>,
     ) -> Result<Self> {
 
         let basic_vis = basic::Renderer::new(factory, rtv.clone())
