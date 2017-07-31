@@ -25,9 +25,6 @@ pub fn display_net_thread_error(e: Error) -> io::Result<()> {
         ErrorKind::BrokenComms => writeln!(stderr, "net: broken comms")?,
         _ => {
             let mut log = stderr.lock();
-            if let Some(backtrace) = e.backtrace() {
-                writeln!(log, "\n{:?}\n", backtrace)?;
-            }
             writeln!(log, "net: {}", e)?;
             for e in e.iter().skip(1) {
                 writeln!(log, "caused by: {}", e)?;
