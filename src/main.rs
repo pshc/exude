@@ -174,8 +174,16 @@ fn build(config: &Config, keys: &issuer::InsecureKeys) -> Result<(DriverInfo, No
         novelty = artifact.novelty;
         match novelty {
             Novelty::StillFresh => {
-                descriptor = issuer::verify(&keys.0, &config.root)?;
-                println!("       Fresh driver");
+                match issuer::verify(&keys.0, &config.root) {
+                    Ok(desc) => {
+                        descriptor = desc;
+                        println!("       Fresh driver");
+                    }
+                    Err(_) => {
+                        descriptor = issuer::sign(&artifact.path, keys, &config.root)?;
+                        println!("  Signed new driver");
+                    }
+                }
             }
             Novelty::BrandNew => {
                 descriptor = issuer::sign(&artifact.path, keys, &config.root)?;
