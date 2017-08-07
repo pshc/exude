@@ -10,4 +10,5 @@ pub enum UpRequest {
 pub enum DownResponse {
     ProposeUpgrade(Box<DriverInfo>),
     Pong(u32),
+    Goats(u32),
 }

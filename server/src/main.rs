@@ -8,6 +8,7 @@ extern crate hyper;
 extern crate proto;
 extern crate tokio_core;
 extern crate tokio_io;
+extern crate tokio_timer;
 
 #[macro_use]
 mod common;
@@ -21,12 +22,13 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::rc::Rc;
+use std::time::Duration;
 
 use futures::future::{self, Future, IntoFuture};
 use futures::stream::{self, Stream};
 use futures::unsync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use tokio_core::net::{TcpListener, TcpStream};
-use tokio_core::reactor::Core;
+use tokio_core::reactor::{Core, Handle};
 use tokio_io::AsyncRead;
 use tokio_io::io::{ReadHalf, WriteHalf};
 
@@ -96,7 +98,17 @@ fn serve(addr: &SocketAddr) -> Result<()> {
                 let (outbox_tx, outbox_rx) = unbounded();
 
                 let entry = Rc::new(ClientEntry { addr, outbox_tx });
-                let id = god.borrow_mut().add_client(entry.clone());
+                let (id, spawn_heart) = {
+                    let mut god = god.borrow_mut();
+                    let id = god.add_client(entry.clone());
+                    let spawn_heart = !god.heartbeating;
+                    god.heartbeating = true;
+                    (id, spawn_heart)
+                };
+
+                if spawn_heart {
+                    handle.spawn(start_heartbeat(god.clone()));
+                }
 
                 let (r, w) = sock.split();
                 let io = ClientIO {
@@ -120,13 +132,15 @@ fn serve(addr: &SocketAddr) -> Result<()> {
 
     // broadcast upgrades to clients
     let god = god.clone();
-    core.handle().spawn(upgrade_rx.for_each(move |info| {
+    let handle = core.handle();
+    handle.spawn(upgrade_rx.for_each(move |info| {
         use api::DownResponse::ProposeUpgrade;
 
         let msg = ProposeUpgrade(box info);
         match Bincoded::new(&msg) {
             Ok(bincoded) => {
                 let info = match msg { ProposeUpgrade(box info) => info, _ => unreachable!() };
+                let digest = info.digest.short_hex();
                 let driver = HashedHeapFile::from_metadata(info)
                     .map_err(|e| writeln!(io::stderr(), "load driver: {}", e).expect("stderr"))?;
 
@@ -136,7 +150,9 @@ fn serve(addr: &SocketAddr) -> Result<()> {
                 let bytes = bincoded.into();
                 let n = god.borrow_mut().broadcast(bytes);
                 if n > 0 {
-                    println!("Sent update to {} client(s)", n);
+                    println!("Sent {} to {} client(s)", digest, n);
+                } else {
+                    println!("Holding new update {}", digest);
                 }
                 Ok(())
             }
@@ -150,7 +166,7 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     core.run(server).chain_err(|| "core listener failed")
 }
 
-fn serve_controller(handle: tokio_core::reactor::Handle, tx: UnboundedSender<DriverInfo>) {
+fn serve_controller(handle: Handle, tx: UnboundedSender<DriverInfo>) {
     let addr: SocketAddr = ([127, 0, 0, 1], 2002).into();
     let listener = TcpListener::bind(&addr, &handle).expect("couldn't bind controller");
     println!("Controller listening on: {}", addr);
@@ -162,7 +178,10 @@ fn serve_controller(handle: tokio_core::reactor::Handle, tx: UnboundedSender<Dri
 
         let (r, _) = sock.split();
         box common::read_bincoded::<_, DriverInfo>(r).and_then(move |(_, info)| {
-            tx.send(info).chain_err(|| "couldn't send upgrade")
+            let digest = info.digest.short_hex();
+            tx.send(info).chain_err(|| "couldn't send upgrade")?;
+            println!("control: received upgrade {}", digest);
+            Ok(())
         })
             .map_err(|e| println!("control: {:?}", e))
     }
@@ -189,6 +208,8 @@ pub type CurrentDriver = Rc<RefCell<Option<HashedHeapFile>>>;
 struct God {
     ctr: ClientId,
     clients: BTreeMap<ClientId, Rc<ClientEntry>>,
+    heartbeating: bool,
+    goats: u32,
 }
 
 impl God {
@@ -196,18 +217,25 @@ impl God {
         God {
             ctr: 0,
             clients: BTreeMap::new(),
+            heartbeating: false,
+            goats: 0,
         }
     }
 }
 
 trait Upstream {
-    fn add_client(&mut self, client: Rc<ClientEntry>) -> ClientId;
+    fn len_clients(&self) -> usize;
+    fn add_client(&mut self, Rc<ClientEntry>) -> ClientId;
     fn remove_client(&mut self, id: ClientId);
     /// Returns the number of clients written to.
     fn broadcast(&mut self, bytes: Bytes) -> usize;
 }
 
 impl Upstream for God {
+    fn len_clients(&self) -> usize {
+        self.clients.len()
+    }
+
     fn add_client(&mut self, client: Rc<ClientEntry>) -> ClientId {
         self.ctr += 1;
         let id = self.ctr;
@@ -241,6 +269,36 @@ impl Upstream for God {
         }
         n
     }
+}
+
+fn start_heartbeat(god: Rc<RefCell<God>>) -> Box<Future<Item = (), Error = ()>> {
+    println!("Starting heartbeat.");
+    box tokio_timer::wheel()
+        .thread_name("heartbeat-timer")
+        .tick_duration(Duration::from_millis(50))
+        .num_slots(16)
+        .initial_capacity(16)
+        .build()
+        .interval(Duration::from_millis(100))
+        .map_err(|e| panic!("heartbeat timer: {}", e))
+        .for_each(move |()| {
+            let mut god = god.borrow_mut();
+            if !god.heartbeating {
+                debug_assert!(false, "are there two heartbeats?");
+                return Err(());
+            }
+            god.goats = god.goats.wrapping_add(1);
+            if god.clients.is_empty() {
+                println!("Stopping heartbeat.");
+                god.heartbeating = false;
+                Err(())
+            } else {
+                let msg = api::DownResponse::Goats(god.goats);
+                let coded = Bincoded::new(&msg).expect("encode heartbeat");
+                god.broadcast(coded.into());
+                Ok(())
+            }
+        })
 }
 
 /// Stored in the table of clients.

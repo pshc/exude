@@ -18,7 +18,8 @@ use comms::{Pipe, Wrapper};
 use driver_abi::DriverCallbacks;
 pub use errors::*;
 use g::{DriverBox, DriverRef, DriverRefMut, Encoder, Res, gfx};
-use g::gfx::traits::FactoryExt;
+use g::gfx::IntoIndexBuffer;
+use g::gfx::traits::{Factory, FactoryExt};
 use proto::api;
 
 #[no_mangle]
@@ -45,15 +46,25 @@ pub extern "C" fn teardown(handle: DriverBox) -> *mut DriverCallbacks {
 pub struct DriverState<P> {
     pipe: P,
     broken_comms: bool,
+    goats: Option<u32>,
 }
 
 impl<P> DriverState<P> {
     pub fn new(pipe: P) -> Self {
-        DriverState { pipe, broken_comms: false }
+        DriverState { pipe, broken_comms: false, goats: None }
     }
 
     pub fn shutdown(self) -> P {
         self.pipe
+    }
+
+    fn handle_resp(&mut self, resp: api::DownResponse) {
+        use api::DownResponse::*;
+        match resp {
+            Pong(n) => println!("Pong: {}", n),
+            ProposeUpgrade(info) => println!("Propose: {:?}", info),
+            Goats(n) => self.goats = Some(n),
+        }
     }
 }
 
@@ -75,12 +86,6 @@ mod simple {
 }
 use simple::{Vertex, pipe};
 
-const TRIANGLE: [Vertex; 3] = [
-    Vertex { pos: [-0.5, -0.5], color: [1.0, 0.0, 0.0] },
-    Vertex { pos: [0.5, -0.5], color: [0.0, 1.0, 0.0] },
-    Vertex { pos: [0.0, 0.5], color: [0.0, 0.0, 1.0] },
-];
-
 /// Convert a Newtype(NonZero<*T>) to &T.
 macro_rules! cast_ptr {
     ($ptr:ident as &mut $t:ty) => {(
@@ -99,7 +104,12 @@ pub extern "C" fn gl_setup(
 ) -> Option<g::GfxBox> {
 
     let state = unsafe { cast_ptr!(state_ref as &DriverState<Wrapper>) };
-    match RenderImpl::<Res, Wrapper>::new(state, factory, rtv) {
+    match RenderImpl::<Res, Wrapper>::new(state, factory, rtv)
+        .and_then(|render| {
+            render.update_goats(factory, None)?;
+            Ok(render)
+        })
+    {
         Ok(render) => {
             let ptr = Box::into_raw(box render) as *mut ();
             unsafe { g::GfxBox::new(ptr) }
@@ -132,7 +142,22 @@ impl<P: Pipe> RenderImpl<Res, P> {
             )
             .chain_err(|| "couldn't set up gfx pipeline")?;
 
-        let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&TRIANGLE, ());
+        let vertex_buffer = factory
+            .create_buffer(
+                3,
+                gfx::buffer::Role::Vertex,
+                gfx::memory::Usage::Upload,
+                gfx::Bind::empty(),
+            )
+            .chain_err(|| "creating vertex buffer")?;
+        let indices = [0u16, 1, 2].into_index_buffer(factory);
+        let slice = gfx::Slice {
+            start: 0,
+            end: 3,
+            base_vertex: 0,
+            instances: None,
+            buffer: indices
+        };
         let data = pipe::Data { vbuf: vertex_buffer, out: rtv };
 
         Ok(
@@ -143,6 +168,18 @@ impl<P: Pipe> RenderImpl<Res, P> {
                 _phantom: PhantomData,
             }
         )
+    }
+
+    pub fn update_goats(&self, factory: &mut g::Factory, goats: Option<u32>) -> Result<()> {
+        use std::f32::consts::PI;
+        let off = goats.map(|n| ((n % 30) as f32 / 15.0 * PI).cos()).unwrap_or(0.0);
+        let mut vbuf = factory
+            .write_mapping(&self.data.vbuf)
+            .chain_err(|| "writing vertex buffer")?;
+        vbuf[0] = Vertex { pos: [-0.5, -0.5], color: [1.0, off, 0.0] };
+        vbuf[1] = Vertex { pos: [0.5, -0.5], color: [0.0, 1.0, off] };
+        vbuf[2] = Vertex { pos: [0.0, 0.5], color: [off, 0.0, 1.0] };
+        Ok(())
     }
 }
 
@@ -171,7 +208,7 @@ impl<P: Pipe> RenderImpl<Res, P> {
             loop {
                 match state.pipe.try_recv::<api::DownResponse>() {
                     Ok(None) => break,
-                    Ok(Some(msg)) => println!("=== {:?} ===", msg),
+                    Ok(Some(resp)) => state.handle_resp(resp),
                     Err(Error(ErrorKind::BrokenComms, _)) => {
                         println!("=== COMMS BROKEN ===");
                         state.broken_comms = true;
@@ -185,8 +222,13 @@ impl<P: Pipe> RenderImpl<Res, P> {
             }
         }
 
-        // update gpu state here...
-        let _ = factory;
+        match self.update_goats(factory, state.goats) {
+            Ok(()) => (),
+            Err(e) => {
+                use error_chain::ChainedError;
+                panic!("{}", e.display());
+            }
+        }
     }
 }
 
