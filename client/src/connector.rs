@@ -121,6 +121,7 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
 pub struct DriverComms {
     pub rx: mpsc::Receiver<Bytes>,
     pub tx: UnboundedSender<Bytes>,
+    pub control_tx: mpsc::Sender<Bytes>,
     packets: HashMap<usize, (usize, usize)>,
 }
 
@@ -128,14 +129,19 @@ pub struct DriverComms {
 const MAX_PACKETS: usize = 32;
 
 impl DriverComms {
-    pub fn new(rx: mpsc::Receiver<Bytes>, tx: UnboundedSender<Bytes>) -> Self {
-        DriverComms { rx, tx, packets: HashMap::with_capacity(MAX_PACKETS) }
+    pub fn new(
+        rx: mpsc::Receiver<Bytes>,
+        tx: UnboundedSender<Bytes>,
+        control_tx: mpsc::Sender<Bytes>,
+    ) -> Self {
+        DriverComms { rx, tx, control_tx, packets: HashMap::with_capacity(MAX_PACKETS) }
     }
 
     pub fn into_callbacks(comms: Box<DriverComms>) -> DriverCallbacks {
         DriverCallbacks {
             ctx: CallbackCtx(Box::into_raw(comms) as *mut ()),
             send_fn: driver_send,
+            control_write_fn: control_write,
             try_recv_fn: driver_try_recv,
             alloc_fn: driver_alloc,
             free_fn: driver_free,
@@ -213,6 +219,20 @@ extern "C" fn driver_send(ctx: CallbackCtx, packet: *mut u8, len: i32) -> i32 {
     DriverComms::with_ctx(ctx, |comms| {
         let slice = unsafe { std::slice::from_raw_parts(packet, len as usize) };
         match comms.tx.send(slice.into()) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
+}
+
+/// Called from driver to issue control messages to us.
+extern "C" fn control_write(ctx: CallbackCtx, packet: *mut u8, len: i32) -> i32 {
+    assert!(len > 0);
+    assert!(!packet.is_null());
+
+    DriverComms::with_ctx(ctx, |comms| {
+        let slice = unsafe { std::slice::from_raw_parts(packet, len as usize) };
+        match comms.control_tx.send(slice.into()) {
             Ok(()) => 0,
             Err(_) => -1,
         }

@@ -14,7 +14,7 @@ mod driver_abi;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 
-use comms::{Pipe, Wrapper};
+use comms::{Chan, Pipe, Wrapper};
 use driver_abi::DriverCallbacks;
 pub use errors::*;
 use g::{DriverBox, DriverRef, DriverRefMut, Encoder, Res, gfx};
@@ -49,7 +49,7 @@ pub struct DriverState<P> {
     goats: Option<u32>,
 }
 
-impl<P> DriverState<P> {
+impl<P: Pipe> DriverState<P> {
     pub fn new(pipe: P) -> Self {
         DriverState { pipe, broken_comms: false, goats: None }
     }
@@ -62,7 +62,10 @@ impl<P> DriverState<P> {
         use api::DownResponse::*;
         match resp {
             Pong(n) => println!("Pong: {}", n),
-            ProposeUpgrade(info) => println!("Propose: {:?}", info),
+            ProposeUpgrade(uri, info) => {
+                let msg = proto::handshake::UpControl::Download(uri, info);
+                self.pipe.send_on_chan(Chan::Control, &msg).expect("control write");
+            }
             Goats(n) => self.goats = Some(n),
         }
     }

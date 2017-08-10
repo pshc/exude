@@ -30,6 +30,7 @@ pub struct DriverCallbacks {
     /// Takes ownership of the passed packet.
     /// On error, returns a negative value.
     pub send_fn: extern "C" fn(CallbackCtx, packet: *mut u8, len: i32) -> i32,
+    pub control_write_fn: extern "C" fn(CallbackCtx, packet: *mut u8, len: i32) -> i32,
 
     /// Attempt to receive a message, non-blocking.
     /// On message, writes the pointer to a new allocated packet, and returns its length.

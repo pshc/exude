@@ -136,10 +136,12 @@ fn serve(addr: &SocketAddr) -> Result<()> {
     handle.spawn(upgrade_rx.for_each(move |info| {
         use api::DownResponse::ProposeUpgrade;
 
-        let msg = ProposeUpgrade(box info);
+        let uri = http::driver_url(&info);
+        let msg = ProposeUpgrade(uri, box info);
         match Bincoded::new(&msg) {
             Ok(bincoded) => {
-                let info = match msg { ProposeUpgrade(box info) => info, _ => unreachable!() };
+                // smelly!
+                let info = match msg { ProposeUpgrade(_, box info) => info, _ => unreachable!() };
                 let digest = info.digest.short_hex();
                 let driver = HashedHeapFile::from_metadata(info)
                     .map_err(|e| writeln!(io::stderr(), "load driver: {}", e).expect("stderr"))?;

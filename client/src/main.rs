@@ -44,11 +44,11 @@ use g::gfx::Device;
 use g::gfx_text;
 use g::gfx_window_glutin;
 use g::glutin::{self, GlContext};
+use proto::{Bincoded, Bytes, handshake};
 
 use common::OurFuture;
 use errors::*;
 use net::DriverUpdate;
-use proto::handshake;
 use render_loop::Engine;
 
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
@@ -75,12 +75,14 @@ fn main() {
 
 fn client(server_addr: SocketAddr) -> Result<()> {
 
-    // for sending a new driver from net to draw thread
-    let (update_tx, update_rx) = mpsc::channel::<Update>();
+    let controller = Controller::new();
+    let control_tx = controller.control_tx.clone();
+    let update_tx = controller.update_tx.clone();
 
     let _net_thread = thread::Builder::new().name("net".into()).spawn(
         move || {
             net::thread(server_addr, move |sock| -> OurFuture<_> {
+                let control_tx = control_tx.clone();
                 let update_tx = update_tx.clone();
                 let hello = handshake::Hello::Newbie;
                 box common::write_bincoded(sock, &hello)
@@ -90,7 +92,7 @@ fn client(server_addr: SocketAddr) -> Result<()> {
 
                         let (driver_tx, driver_rx) = mpsc::channel();
                         let (tx, rx) = unbounded();
-                        let comms = connector::DriverComms::new(driver_rx, tx);
+                        let comms = connector::DriverComms::new(driver_rx, tx, control_tx);
 
                         // inform the draw thread about our new driver
                         update_tx.send((path, box comms))
@@ -111,7 +113,7 @@ fn client(server_addr: SocketAddr) -> Result<()> {
     let (window, mut device, mut factory, main_color, main_depth) =
         gfx_window_glutin::init::<g::ColorFormat, g::DepthFormat>(window, context, &events_loop);
 
-    let mut engine = Hot::new(&mut factory, main_color, main_depth, update_rx)?;
+    let mut engine = Hot::new(controller, &mut factory, main_color, main_depth)?;
 
     let mut encoder = factory.create_command_buffer().into();
 
@@ -153,24 +155,42 @@ fn client(server_addr: SocketAddr) -> Result<()> {
     Ok(())
 }
 
+/// Hub for control/upgrade messages. Owned by the engine.
+pub struct Controller {
+    control_rx: mpsc::Receiver<Bytes>,
+    pub control_tx: mpsc::Sender<Bytes>,
+    update_rx: mpsc::Receiver<Update>,
+    pub update_tx: mpsc::Sender<Update>,
+}
+
+impl Controller {
+    fn new() -> Self {
+        // for receiving signals from the driver
+        let (control_tx, control_rx) = mpsc::channel::<Bytes>();
+        // for sending new drivers to the draw thread
+        let (update_tx, update_rx) = mpsc::channel::<Update>();
+        Controller { control_rx, control_tx, update_rx, update_tx }
+    }
+}
+
 /// Our driver-loading Engine.
 struct Hot {
     basic_vis: basic::Renderer<g::Res>,
+    controller: Controller,
     driver: Option<(connector::Driver, g::GfxBox)>,
     main_color: g::RenderTargetView,
     main_depth: g::DepthStencilView,
     text: gfx_text::Renderer<g::Res, g::Factory>,
-    update_rx: mpsc::Receiver<Update>,
 }
 
 type Update = DriverUpdate<connector::DriverComms>;
 
 impl Hot {
     fn new(
+        controller: Controller,
         factory: &mut g::Factory,
         rtv: g::RenderTargetView,
         dsv: g::DepthStencilView,
-        update_rx: mpsc::Receiver<Update>,
     ) -> Result<Self> {
 
         let basic_vis = basic::Renderer::new(factory, rtv.clone())
@@ -182,14 +202,23 @@ impl Hot {
         Ok(
             Hot {
                 basic_vis,
+                controller,
                 driver: None,
                 main_color: rtv,
                 main_depth: dsv,
                 text,
-                update_rx,
             }
         )
     }
+
+    pub fn obey(&mut self, msg: handshake::UpControl) -> Result<()> {
+        use handshake::UpControl::*;
+        match msg {
+            Download(uri, info) => println!("download {:?} {}", uri, info.digest.short_hex()),
+        }
+        Ok(())
+    }
+
 }
 
 impl Engine<g::Res> for Hot {
@@ -217,7 +246,17 @@ impl Engine<g::Res> for Hot {
 
     fn update(&mut self, _: &mut (), factory: &mut g::Factory) -> Result<()> {
 
-        if let Ok((path, comms)) = self.update_rx.try_recv() {
+        // xxx handle disconnected pipe
+        if let Ok(bytes) = self.controller.control_rx.try_recv() {
+            let coded = unsafe { Bincoded::from_bytes(bytes) };
+            match coded.deserialize() {
+                Ok(msg) => self.obey(msg)?,
+                Err(e) => println!("control: de: {:?}", e),
+            }
+        }
+
+        // xxx handle disconnected pipe
+        if let Ok((path, comms)) = self.controller.update_rx.try_recv() {
             println!("Loading driver...");
             io::stdout().flush().expect("stderr");
 

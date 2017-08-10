@@ -24,3 +24,9 @@ pub enum Hello {
     Cached(Digest),
     Oneshot(Digest),
 }
+
+/// Control messages from driver to loader.
+#[derive(Debug, Deserialize, Serialize)]
+pub enum UpControl {
+    Download(String, Box<DriverInfo>),
+}

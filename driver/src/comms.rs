@@ -8,10 +8,21 @@ use proto::bincoded;
 use proto::serde::{Deserialize, Serialize};
 
 pub trait Pipe {
-    fn send<T: Serialize>(&self, &T) -> Result<()>;
+    fn send_on_chan<T: Serialize>(&self, Chan, &T) -> Result<()>;
     fn try_recv<T>(&self) -> Result<Option<T>>
     where
         for<'de> T: Deserialize<'de>;
+
+    fn send<T: Serialize>(&self, msg: &T) -> Result<()> {
+        self.send_on_chan(Chan::Server, msg)
+    }
+}
+
+/// Whether to send to the server or to the client loader (control).
+#[derive(Clone, Copy, Debug)]
+pub enum Chan {
+    Server,
+    Control,
 }
 
 /// Safe high-level wrapper for DriverCallbacks.
@@ -30,7 +41,7 @@ impl Wrapper {
 }
 
 impl Pipe for Wrapper {
-    fn send<T: Serialize>(&self, msg: &T) -> Result<()> {
+    fn send_on_chan<T: Serialize>(&self, chan: Chan, msg: &T) -> Result<()> {
         let cbs = unsafe { &*self.0 };
 
         let len = bincoded::serialized_size(msg)? as i32;
@@ -39,7 +50,11 @@ impl Pipe for Wrapper {
         let mut packet_ref = unsafe { ::std::slice::from_raw_parts_mut(packet, len as usize) };
         match bincoded::bincode::serialize_into(&mut packet_ref, msg, bincoded::bincode::Infinite) {
             Ok(()) => {
-                let code = (cbs.send_fn)(cbs.ctx, packet, len);
+                let send = match chan {
+                    Chan::Server => cbs.send_fn,
+                    Chan::Control => cbs.control_write_fn,
+                };
+                let code = send(cbs.ctx, packet, len);
                 ensure!(code >= 0, ErrorKind::BrokenComms);
                 Ok(())
             }

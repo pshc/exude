@@ -8,7 +8,7 @@ pub enum UpRequest {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum DownResponse {
-    ProposeUpgrade(Box<DriverInfo>),
+    ProposeUpgrade(String, Box<DriverInfo>),
     Pong(u32),
     Goats(u32),
 }
