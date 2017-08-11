@@ -74,7 +74,7 @@ impl Renderer<Res> {
         Ok(())
     }
 
-    pub fn draw(&self, mut encoder: &mut Encoder) {
+    pub fn draw(&self, encoder: &mut Encoder) {
         encoder.draw(&self.slice, &self.pso, &self.data);
     }
 }

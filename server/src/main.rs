@@ -1,5 +1,6 @@
 #![feature(box_patterns, box_syntax)]
 #![recursion_limit = "1024"]
+#![allow(unused_doc_comment)] // temp until error_chain updated
 
 #[macro_use]
 extern crate error_chain;

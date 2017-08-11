@@ -1,5 +1,6 @@
 #![feature(box_syntax, nonzero)]
 #![recursion_limit = "1024"]
+#![allow(unused_doc_comment)] // temp until error_chain updated
 
 #[macro_use]
 extern crate error_chain;
@@ -32,7 +33,7 @@ pub extern "C" fn setup(cbs: *mut DriverCallbacks) -> Option<DriverBox> {
     let pipe = Wrapper::new(cbs);
     let state = DriverState::new(pipe);
     let ptr = Box::into_raw(box state) as *mut ();
-    unsafe { DriverBox::new(ptr) }
+    DriverBox::new(ptr)
 }
 
 #[no_mangle]
@@ -115,7 +116,7 @@ pub extern "C" fn gl_setup(
     {
         Ok(render) => {
             let ptr = Box::into_raw(box render) as *mut ();
-            unsafe { g::GfxBox::new(ptr) }
+            g::GfxBox::new(ptr)
         }
         Err(e) => {
             let _ = writeln!(io::stderr(), "Driver setup: {}", e);
@@ -200,7 +201,7 @@ pub extern "C" fn gl_draw(ctx: g::GfxRef, encoder: &mut Encoder) {
 }
 
 impl<P: Pipe> RenderImpl<Res, P> {
-    pub fn draw(&self, mut encoder: &mut Encoder) {
+    pub fn draw(&self, encoder: &mut Encoder) {
         encoder.draw(&self.slice, &self.pso, &self.data);
         std::thread::sleep(std::time::Duration::from_millis(10));
     }

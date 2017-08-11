@@ -61,16 +61,12 @@ macro_rules! backend_items {
         pub struct GfxBox(NonZero<*mut ()>);
 
         impl GfxBox {
-            pub unsafe fn new(ptr: *mut ()) -> Option<Self> {
-                if ptr.is_null() {
-                    None
-                } else {
-                    Some(GfxBox(NonZero::new(ptr)))
-                }
+            pub fn new(ptr: *mut ()) -> Option<Self> {
+                NonZero::new(ptr).map(GfxBox)
             }
 
             pub fn borrow<'a>(&'a self) -> GfxRef<'a> {
-                let ptr = unsafe { NonZero::new(self.0.get() as *const ()) };
+                let ptr = unsafe { NonZero::new_unchecked(self.0.get() as *const ()) };
                 GfxRef(ptr, PhantomData)
             }
 
@@ -114,16 +110,12 @@ panic!("please enable at least one backend (e.g. cargo build --features=gl)");
 pub struct DriverBox(NonZero<*mut ()>);
 
 impl DriverBox {
-    pub unsafe fn new(ptr: *mut ()) -> Option<Self> {
-        if ptr.is_null() {
-            None
-        } else {
-            Some(DriverBox(NonZero::new(ptr)))
-        }
+    pub fn new(ptr: *mut ()) -> Option<Self> {
+        NonZero::new(ptr).map(DriverBox)
     }
 
     pub fn borrow<'a>(&'a self) -> DriverRef<'a> {
-        let ptr = unsafe { NonZero::new(self.0.get() as *const ()) };
+        let ptr = unsafe { NonZero::new_unchecked(self.0.get() as *const ()) };
         DriverRef(ptr, PhantomData)
     }
 

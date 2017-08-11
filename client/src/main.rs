@@ -1,5 +1,6 @@
 #![feature(box_syntax, drop_types_in_const)]
 #![recursion_limit = "1024"]
+#![allow(unused_doc_comment)] // temp until error_chain updated
 
 extern crate digest;
 #[macro_use]
