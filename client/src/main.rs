@@ -80,7 +80,7 @@ fn client(server_addr: SocketAddr) -> Result<()> {
     let control_tx = controller.control_tx.clone();
     let update_tx = controller.update_tx.clone();
 
-    let _net_thread = thread::Builder::new().name("net".into()).spawn(
+    thread::Builder::new().name("net".into()).spawn(
         move || {
             net::thread(server_addr, move |sock| -> OurFuture<_> {
                 let control_tx = control_tx.clone();
@@ -102,7 +102,7 @@ fn client(server_addr: SocketAddr) -> Result<()> {
                     })
             })
         }
-    );
+    ).expect("net thread");
 
     let mut events_loop = g::EventsLoop::new();
     let window = glutin::WindowBuilder::new()

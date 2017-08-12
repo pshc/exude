@@ -77,7 +77,7 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
         net_comms = net::Comms { tx: driver_tx, rx: rx };
     }
 
-    let _net_thread = thread::spawn(
+    thread::Builder::new().name("net".into()).spawn(
         move || {
             let mut core = Core::new().expect("net: core");
             let handle = core.handle();
@@ -125,7 +125,7 @@ fn oneshot(server_addr: SocketAddr) -> Result<()> {
                 Err(e) => client::errors::display_net_thread_error(e).expect("net: stderr?"),
             }
         },
-    );
+    ).expect("net thread");
 
     let mut state: DriverState<StaticComms> = DriverState::new(io_comms);
 
