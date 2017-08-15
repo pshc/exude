@@ -176,12 +176,11 @@ impl DriverComms {
         ptr
     }
 
-    unsafe fn vec_from_packet(&mut self, packet: *mut u8, len: usize) {
+    unsafe fn vec_from_packet(&mut self, packet: *mut u8, len: usize) -> Vec<u8> {
         let (stored_len, cap) = self.packets.remove(&(packet as usize)).expect("free invalid");
         assert_eq!(len, stored_len);
         assert!(cap >= len);
-        let vec = Vec::from_raw_parts(packet, len, cap);
-        drop(vec);
+        Vec::from_raw_parts(packet, len, cap)
     }
 }
 
@@ -217,8 +216,8 @@ extern "C" fn driver_send(ctx: CallbackCtx, packet: *mut u8, len: i32) -> i32 {
     assert!(!packet.is_null());
 
     DriverComms::with_ctx(ctx, |comms| {
-        let slice = unsafe { std::slice::from_raw_parts(packet, len as usize) };
-        match comms.tx.send(slice.into()) {
+        let vec = unsafe { comms.vec_from_packet(packet, len as usize) };
+        match comms.tx.send(vec.into()) {
             Ok(()) => 0,
             Err(_) => -1,
         }
@@ -231,8 +230,8 @@ extern "C" fn control_write(ctx: CallbackCtx, packet: *mut u8, len: i32) -> i32 
     assert!(!packet.is_null());
 
     DriverComms::with_ctx(ctx, |comms| {
-        let slice = unsafe { std::slice::from_raw_parts(packet, len as usize) };
-        match comms.control_tx.send(slice.into()) {
+        let vec = unsafe { comms.vec_from_packet(packet, len as usize) };
+        match comms.control_tx.send(vec.into()) {
             Ok(()) => 0,
             Err(_) => -1,
         }
