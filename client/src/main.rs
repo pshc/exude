@@ -80,24 +80,26 @@ fn client(server_addr: SocketAddr) -> Result<()> {
     let control_tx = controller.control_tx.clone();
     let update_tx = controller.update_tx.clone();
 
+    let inbox: net::MessageBuffer = Default::default();
+
     thread::Builder::new().name("net".into()).spawn(
         move || {
             net::thread(server_addr, move |sock| -> OurFuture<_> {
                 let control_tx = control_tx.clone();
                 let update_tx = update_tx.clone();
+                let inbox = inbox.clone();
                 let hello = handshake::Hello::Newbie;
                 box common::write_bincoded(sock, &hello)
                     .and_then(|(sock, _)| receive::fetch_driver(sock))
                     .and_then(move |(sock, info, path)| {
                         println!("driver {}", info.digest.short_hex());
 
-                        let (driver_tx, driver_rx) = mpsc::channel();
                         let (tx, rx) = unbounded();
-                        let comms = connector::DriverComms::new(driver_rx, tx, control_tx);
+                        let comms = connector::DriverComms::new(inbox.clone(), tx, control_tx);
 
                         // inform the draw thread about our new driver
                         update_tx.send((path, box comms))
-                            .map(|()| (sock, net::ClientSide { tx: driver_tx, rx: rx }))
+                            .map(|()| (sock, net::ClientSide { inbox, rx }))
                             .map_err(|_| ErrorKind::BrokenComms.into())
                     })
             })

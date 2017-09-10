@@ -9,6 +9,8 @@ use std::sync::mpsc;
 use futures::sync::mpsc::UnboundedSender;
 use libloading::{Library, Symbol};
 
+use net::MessageBuffer;
+
 use driver_abi::{self, CallbackCtx, DriverCallbacks};
 use g;
 use proto::Bytes;
@@ -119,7 +121,7 @@ pub fn load(path: &Path, comms: Box<DriverComms>) -> io::Result<Driver> {
 
 /// Generates function pointers and context for DriverCallbacks.
 pub struct DriverComms {
-    pub rx: mpsc::Receiver<Bytes>,
+    pub inbox: MessageBuffer,
     pub tx: UnboundedSender<Bytes>,
     pub control_tx: mpsc::Sender<Bytes>,
     packets: HashMap<usize, (usize, usize)>,
@@ -130,11 +132,11 @@ const MAX_PACKETS: usize = 32;
 
 impl DriverComms {
     pub fn new(
-        rx: mpsc::Receiver<Bytes>,
+        inbox: MessageBuffer,
         tx: UnboundedSender<Bytes>,
         control_tx: mpsc::Sender<Bytes>,
     ) -> Self {
-        DriverComms { rx, tx, control_tx, packets: HashMap::with_capacity(MAX_PACKETS) }
+        DriverComms { inbox, tx, control_tx, packets: HashMap::with_capacity(MAX_PACKETS) }
     }
 
     pub fn into_callbacks(comms: Box<DriverComms>) -> DriverCallbacks {
@@ -243,23 +245,25 @@ extern "C" fn driver_try_recv(ctx: CallbackCtx, packet_out: *mut *mut u8) -> i32
     assert!(!packet_out.is_null());
 
     DriverComms::with_ctx(ctx, |comms| {
-        match comms.rx.try_recv() {
-            Ok(bytes) => {
-                // ideally we would transform `bytes` into a `vec` here, rather than copy:
-                // https://github.com/carllerche/bytes/issues/86
-                let vec = bytes.to_vec();
-
-                let len = vec.len();
-                assert!(len != 0);
-                assert!(len <= std::i32::MAX as usize);
-
-                unsafe {
-                    *packet_out = comms.packet_from_vec(vec);
+        let vec;
+        {
+            let mut inbox = comms.inbox.lock().expect("open inbox");
+            match inbox.pop_front() {
+                Some(bytes) => {
+                    // ideally we would transform `bytes` into a `vec` here, rather than copy:
+                    // https://github.com/carllerche/bytes/issues/86
+                    vec = bytes.to_vec();
                 }
-                len as i32
+                None => return 0, // XXX indicate disconnection (return -1)
             }
-            Err(mpsc::TryRecvError::Empty) => 0,
-            Err(mpsc::TryRecvError::Disconnected) => -1,
         }
+        let len = vec.len();
+        assert!(len != 0);
+        assert!(len <= std::i32::MAX as usize);
+
+        unsafe {
+            *packet_out = comms.packet_from_vec(vec);
+        }
+        len as i32
     })
 }

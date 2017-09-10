@@ -1,8 +1,9 @@
+use std::collections::VecDeque;
 use std::time::Duration;
 use std::path::PathBuf;
 use std::net::SocketAddr;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 
 use common::{self, OurFuture};
 use errors::*;
@@ -73,15 +74,17 @@ where
 
 pub type DriverUpdate<D> = (PathBuf, Box<D>);
 
+pub type MessageBuffer = Arc<Mutex<VecDeque<Bytes>>>;
+
 pub struct ClientSide {
-    pub tx: mpsc::Sender<Bytes>,
+    pub inbox: MessageBuffer,
     pub rx: UnboundedReceiver<Bytes>,
 }
 
 impl ClientSide {
     pub fn handle(self, sock: TcpStream) -> OurFuture<()> {
         let (r, w) = sock.split();
-        let ClientSide { tx, rx } = self;
+        let ClientSide { inbox, rx } = self;
 
         fn swap<A, B>((a, b): (A, B)) -> (B, A) {
             (b, a)
@@ -90,8 +93,9 @@ impl ClientSide {
         let read = stream::unfold(r, |r| Some(common::read_with_length(r).map(swap)))
             .for_each(
                 move |bytes| {
-                    tx.send(bytes.freeze())
-                        .chain_err(|| ErrorKind::BrokenComms)
+                    let mut inbox = inbox.lock().expect("put message in inbox");
+                    inbox.push_back(bytes.freeze());
+                    Ok(())
                 }
             );
 
